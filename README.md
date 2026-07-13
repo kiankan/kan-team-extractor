@@ -8,15 +8,18 @@
 - پنل وب با ادیتور چیدمان/رنگ/ایموجی دکمه‌ها + **تب مدیریت استخراج‌ها**
 - صفحه‌ی عمومی نمایش وضعیت ساب با بروزرسانی زنده، فیلتر پروتکل و دانلود کانفیگ‌ها
 
-## فایل‌ها
-`bot.php` ربات | `webpanel.php` پنل وب | `sub_view.php` صفحه نمایش ساب | `sub_refresh.php` بروزرسانی زنده | `inc_extractor.php` استخراج‌کننده | `table.php` ساخت دیتابیس | `config.php` تنظیمات | `installer/` نصب گرافیکی
 
 ## نیازمندی‌ها
 - Ubuntu 24.04
 - PHP 8.2
 - MySQL
 
-## نصب
+
+## نصب برای سرور 
+
+curl -sL https://raw.githubusercontent.com/kiankan/kan-team-extractor/main/install.sh \
+  | sudo bash -s -- install
+## نصب برای هاست
 1. فایل‌ها را آپلود کنید.
 2. `config.php` را پر کنید (توکن ربات، دیتابیس، `ADMIN_ID`).
 3. `table.php` را یک‌بار در مرورگر باز کنید (یا از `installer/index.php` استفاده کنید).
