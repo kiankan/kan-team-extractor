@@ -556,6 +556,17 @@ function getCronToken(): string {
     return substr(hash('sha256', BOT_TOKEN . '|cron_backup_secret_v1'), 0, 24);
 }
 
+// نکته امنیتی/حریم‌خصوصی: لینک ساب هر کاربر فقط ۵ دقیقه (از آخرین استخراج/بروزرسانی)
+// در دیتابیس نگه داشته می‌شود و بعدش به‌طور کامل حذف می‌شود؛ نه در بکاپ‌ها می‌ماند
+// و نه از طریق پنل وب یا ربات، بعد از انقضا قابل مشاهده است.
+const EXTRACTION_TTL_SECONDS = 300;
+
+function purgeExpiredExtractions($pdo): void {
+    try {
+        $pdo->exec("DELETE FROM extractions WHERE created_at < (NOW() - INTERVAL " . EXTRACTION_TTL_SECONDS . " SECOND)");
+    } catch (\Throwable $e) { /* نادیده گرفته شود؛ اجرای بعدی دوباره امتحان می‌کند */ }
+}
+
 function createDbBackupFile($pdo) {
     $tables   = ['users', 'user_states', 'settings', 'admins'];
     $sqlDump  = "-- DB Backup\n-- Time: " . date('Y-m-d H:i:s') . "\n\n";
@@ -739,8 +750,29 @@ function importDbBackupFile($pdo, string $sqlContent): array {
     return $result;
 }
 
-// نکته: تابع بکاپ سورس (createSourceBackupFile) به‌طور کامل از پروژه حذف شد.
-// بکاپ‌گیری فقط از دیتابیس انجام می‌شود (createDbBackupFile).
+function createSourceBackupFile() {
+    $zipFile = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
+    if (class_exists('ZipArchive')) {
+        $zip = new ZipArchive();
+        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator(__DIR__),
+                RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($files as $file) {
+                if (!$file->isDir()) {
+                    $filePath     = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
+                    if ($relativePath !== $zipFile && $relativePath !== 'config.php')
+                        $zip->addFile($filePath, $relativePath);
+                }
+            }
+            $zip->close();
+            return $zipFile;
+        }
+    }
+    return false;
+}
 
 function removeBotEmojis($text) {
     $emojis = ['🔍','🗂','📞','👨‍💼','📊','👤','👥','📢','⚙️','🔐','📝','✨','💾','📦','✍️','🔓','🔒','🔻','🤖','🔙','✅','❌','📥','🌐','🏠','🔄','📄','🔲','🔋','⏳','📌','📡','🗣','🟢','🔴','🚪','➕','🗑','👨‍💻','📂','📁','⬅️','➡️','👮‍♂️','🛠','💳','🔊','🔇','🌟','🎨','⏱','🔓','💤'];
@@ -1063,6 +1095,7 @@ function generateExtractionToken(): string {
 }
 
 function saveExtraction($pdo, string $token, $userId, string $subUrl, array $subData, array $headerInfo): void {
+    purgeExpiredExtractions($pdo);
     $totalBytes  = (float)($headerInfo['total'] ?? 0);
     $usedBytes   = (float)($headerInfo['upload'] ?? 0) + (float)($headerInfo['download'] ?? 0);
     $expireTs    = (int)($headerInfo['expire'] ?? 0);
@@ -1117,6 +1150,7 @@ function getBtnRegistry(): array {
         // buildMenuKeyboard() انجام می‌شود تا همیشه فقط از داخل دکمه‌ی
         // «💾 بک‌آپ» (backup_folder_nav) در دسترس باشند.
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'callback' => 'backup_db_manual',       'style' => 'primary', 'menu' => 'admin_menu'],
+        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'callback' => 'backup_source_manual',   'style' => 'primary', 'menu' => 'admin_menu'],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',          'callback' => 'restore_backup_nav',     'style' => 'danger',  'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'callback' => 'back_to_main_menu',      'style' => 'success', 'menu' => 'admin_menu'],
 
@@ -1143,8 +1177,6 @@ function getDefaultMenuLayouts(): array {
             ['btn_admin_broadcast', 'btn_admin_status'],
             ['btn_admin_lock', 'btn_admin_admins'],
             ['btn_admin_premium', 'btn_admin_settings'],
-            ['btn_admin_reports'],
-            ['btn_admin_webpanel', 'btn_admin_settingspanel'],
             ['btn_admin_cron', 'btn_admin_backup'],
             ['btn_admin_back']
         ],
@@ -1175,7 +1207,7 @@ function getMenuLayout($pdo, string $menuKey): array {
 // و هرگز مستقیم در سطح اول منوی ادمین رندر نشوند (حتی اگر چیدمان
 // سفارشیِ ذخیره‌شده از پنل وب اشتباهاً آن‌ها را در همان سطح قرار داده باشد).
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
 }
 
 // می‌سازد کیبورد شیشه‌ای یک منو را، بر اساس چیدمان و متن‌های ذخیره‌شده از پنل وب (webpanel.php)
@@ -1278,6 +1310,9 @@ if ($isCronRequest) {
     // به‌صورت خودکار و مخصوص همین نصب، از روی BOT_TOKEN شما ساخته می‌شود؛ برای
     // دیدن مقدار دقیقش به تب «⏱ کرون» در پنل وب مراجعه کنید.
     if (isset($_GET['token']) && hash_equals(getCronToken(), (string)$_GET['token'])) {
+        // پاکسازی لینک‌های ساب منقضی‌شده مستقل از تنظیمات فاصله‌ی بکاپه، همیشه اجرا می‌شود
+        purgeExpiredExtractions($pdo);
+
         $interval = (int)getSetting($pdo, 'cron_interval', '300');
         if ($interval === 0) {
             echo json_encode(["status" => "skipped", "message" => "Cron backup is disabled from admin panel."]);
@@ -1292,10 +1327,10 @@ if ($isCronRequest) {
         
         setSetting($pdo, 'last_cron_backup', (string)time());
 
-        // نکته: بکاپ سورس از کل پروژه حذف شده؛ کرون فقط از دیتابیس بکاپ می‌گیرد.
-        $dbFile = createDbBackupFile($pdo);
+        $dbFile  = createDbBackupFile($pdo);
+        $srcFile = createSourceBackupFile();
 
-        $captionBase = "🔄 <b>بکاپ خودکار دیتابیس (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
+        $captionBase = "🔄 <b>بکاپ خودکار سیستم (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
         
         if ($dbFile && file_exists($dbFile)) {
             $caption = "💾 " . $captionBase;
@@ -1313,6 +1348,24 @@ if ($isCronRequest) {
                 curl_exec($ch); curl_close($ch);
             }
             unlink($dbFile);
+        }
+
+        if ($srcFile && file_exists($srcFile)) {
+            $caption = "📦 " . $captionBase;
+            sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $srcFile);
+            
+            if (defined('ADMIN_ID')) {
+                $caption = applyPremiumToText($caption); 
+                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true, 
+                    CURLOPT_POST => true, 
+                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($srcFile)), 'caption' => $caption, 'parse_mode' => 'HTML'], 
+                    CURLOPT_TIMEOUT => 30
+                ]);
+                curl_exec($ch); curl_close($ch);
+            }
+            unlink($srcFile);
         }
         echo json_encode(["status" => "success", "message" => "Backup executed and sent successfully."]);
         exit;
@@ -1625,7 +1678,7 @@ try {
                     if (($subData['protocols']['custom'] ?? 0) > 0) $otherText .= " | Custom: {$subData['protocols']['custom']}";
                     if (($subData['protocols']['json'] ?? 0) > 0)   $otherText .= " | JSON: {$subData['protocols']['json']}";
                     
-                    $resText = "📊 <b>گزارش استخراج:</b>\n\n📦 کل کانفیگ‌ها: {$subData['total_configs']}\n📈 حجم کل: {$volStr}\n📉 مصرف شده: {$usedStr}\n🔋 باقیمانده: {$remainStr}\n⏳ انقضا: {$expStr}\n\n🔹 <b>پروتکل‌ها:</b>\nVLESS: {$subData['protocols']['vless']} | VMess: {$subData['protocols']['vmess']}{$otherText}\n\n📝 <b>نام‌ها:</b>\n";
+                    $resText = "📊 <b>گزارش استخراج:</b>\n\n📦 کل کانفیگ‌ها: {$subData['total_configs']}\n📈 حجم کل: {$volStr}\n📉 مصرف شده: {$usedStr}\n🔋 باقیمانده: {$remainStr}\n⏳ انقضا: {$expStr}\n\n🔹 <b>پروتکل‌ها:</b>\nVLESS: {$subData['protocols']['vless']} | VMess: {$subData['protocols']['vmess']}{$otherText}\n\n⏳ <i>لینک «مشاهده در وب» فقط تا ۵ دقیقه بعد از آخرین بروزرسانی معتبره و بعدش به‌طور خودکار حذف می‌شه.</i>\n\n📝 <b>نام‌ها:</b>\n";
                     foreach ($subData['configs_list'] as $i => $c) {
                         if ($i >= 30) { $resText .= "\n... و " . ($subData['total_configs'] - 30) . " تای دیگر.\n"; break; }
                         $resText .= ($i + 1) . ". " . addFlagToConfigName($c['name']) . "\n";
@@ -1809,11 +1862,12 @@ try {
             if (!$isAdmin) exit;
             $kb = ['inline_keyboard' => []];
             $kb['inline_keyboard'][] = [createBtn('💾 بکاپ دیتابیس', 'backup_db_manual', 'primary', 'btn_admin_db')];
+            $kb['inline_keyboard'][] = [createBtn('📦 بکاپ سورس', 'backup_source_manual', 'primary', 'btn_admin_src')];
             if ($isSupAdmin) {
                 $kb['inline_keyboard'][] = [createBtn('📥 ایمپورت بک‌آپ', 'restore_backup_nav', 'danger', 'btn_admin_restore')];
             }
             $kb['inline_keyboard'][] = [createBtn('🔙 بازگشت', 'main_admin', 'danger', 'btn_admin_back')];
-            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
+            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📦 بکاپ سورس: دریافت فایل ZIP از سورس کد\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
             exit;
         }
 
@@ -1871,7 +1925,7 @@ try {
             $botPing      = round((microtime(true) - $pingStart) * 1000);
             $totalUsers   = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
             $blockedUsers = $pdo->query("SELECT COUNT(*) FROM users WHERE is_blocked=1")->fetchColumn();
-            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v1.0 team kan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
+            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v2.3 team kan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
             exit;
         }
 
@@ -2003,13 +2057,13 @@ try {
             exit;
         }
 
-        if ($data === 'backup_db_manual') {
+        if ($data === 'backup_db_manual' || $data === 'backup_source_manual') {
             if (!$isAdmin) exit;
             answerCallback($callbackId, "⏳ در حال آماده‌سازی و ارسال...");
-            $file = createDbBackupFile($pdo);
+            $file = ($data === 'backup_db_manual') ? createDbBackupFile($pdo) : createSourceBackupFile();
             
             if ($file && file_exists($file)) {
-                $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
+                $caption = ($data === 'backup_db_manual') ? "💾 <b>بکاپ دستی دیتابیس</b>" : "📦 <b>بکاپ دستی سورس کد</b>";
                 
                 $adminCaption = applyPremiumToText($caption); 
                 $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
@@ -2283,16 +2337,6 @@ try {
                 $subUrl    = $stateData['sub_url'] ?? '';
                 $stateTime = $stateData['time'] ?? 0;
 
-                // دکمه‌ی «مشاهده در وب» که باید در تمام صفحه‌های زیرمنوی استخراج
-                // (دریافت کانفیگ/آی‌پی/QR و بروزرسانی) هم در دسترس بماند
-                $viewToken   = $stateData['view_token'] ?? '';
-                $webViewRow  = [];
-                if ($viewToken) {
-                    $webViewLabel = getCustomBtnLabels($pdo)['btn_web_view'] ?? '🖥 مشاهده در وب';
-                    $webViewUrl   = getWebRootUrl() . "/sub_view.php?id=" . $viewToken;
-                    $webViewRow   = [createUrlBtn($webViewLabel, $webViewUrl, 'success', 'btn_web_view')];
-                }
-
                 if (time() - $stateTime > 300) {
                     answerCallback($callbackId, '❌ زمان ۵ دقیقه‌ای این پنل تمام شده است.', true);
                     $pdo->prepare("DELETE FROM user_states WHERE user_id = ? AND state = 'HAS_SUB_DATA'")->execute([$chatId]);
@@ -2363,7 +2407,7 @@ try {
                             }
                             if (!empty($currentText)) $messages[] = $currentText;
                             foreach ($messages as $idx => $msg) {
-                                $kb = ($idx == count($messages) - 1) ? ['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]))] : null;
+                                $kb = ($idx == count($messages) - 1) ? ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]] : null;
                                 sendMessage($chatId, $msg, $kb);
                                 usleep(250000);
                             }
@@ -2371,7 +2415,7 @@ try {
                             $emptyText = (is_array($subData) && ($subData['error'] ?? '') === 'html_page')
                                 ? "🌐 این لینک یک صفحه‌ی وب است، نه ساب مستقیم؛ کانفیگی برای دریافت وجود ندارد."
                                 : "❌ کانفیگی یافت نشد.";
-                            sendMessage($chatId, $emptyText, ['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]))]);
+                            sendMessage($chatId, $emptyText, ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]]);
                         }
                         exit;
                     }
@@ -2397,7 +2441,6 @@ try {
                                     usleep(500000);
                                 }
                             }
-                            sendMessage($chatId, "✅ بارکدها ارسال شد.", ['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]))]);
                         } else {
                             $emptyText = (is_array($subData) && ($subData['error'] ?? '') === 'html_page')
                                 ? "🌐 این لینک یک صفحه‌ی وب است، نه ساب مستقیم؛ QR کدی برای ساخت وجود ندارد."
@@ -2427,7 +2470,7 @@ try {
                                 else                                                                        $ipText .= "🟢 آی‌پی/دامنه: <code>{$host}</code>\n\n";
                             }
                             foreach (splitTextSafely($ipText, 3900) as $idx => $msg) {
-                                $kb = ($idx == count(splitTextSafely($ipText, 3900)) - 1) ? ['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]))] : null;
+                                $kb = ($idx == count(splitTextSafely($ipText, 3900)) - 1) ? ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]] : null;
                                 sendMessage($chatId, $msg, $kb);
                                 usleep(250000);
                             }
@@ -2435,7 +2478,7 @@ try {
                             $emptyText = (is_array($subData) && ($subData['error'] ?? '') === 'html_page')
                                 ? "🌐 این لینک یک صفحه‌ی وب است، نه ساب مستقیم؛ آی‌پی قابل استخراج نیست."
                                 : "❌ هیچ آی‌پی یافت نشد.";
-                            sendMessage($chatId, $emptyText, ['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]))]);
+                            sendMessage($chatId, $emptyText, ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]]);
                         }
                         exit;
                     }
@@ -2444,7 +2487,7 @@ try {
                         $qrUrl    = "https://quickchart.io/qr?text=" . urlencode($subUrl) . "&size=500&margin=2&dark=000000&light=ffffff";
                         $ch       = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendPhoto");
                         $caption  = applyPremiumToText("𔲲 <b>کیو‌آر کد ساب‌اسکریپشن شما</b>\n\nلینک: <code>{$subUrl}</code>"); 
-                        $postData = ['chat_id' => $chatId, 'photo' => $qrUrl, 'caption' => $caption, 'parse_mode' => 'HTML', 'reply_markup' => json_encode(['inline_keyboard' => array_values(array_filter([$webViewRow, [createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]))])];
+                        $postData = ['chat_id' => $chatId, 'photo' => $qrUrl, 'caption' => $caption, 'parse_mode' => 'HTML', 'reply_markup' => json_encode(['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]])];
                         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 15]);
                         curl_exec($ch); curl_close($ch);
                         exit;
