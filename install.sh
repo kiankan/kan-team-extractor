@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  install.sh — Installer and management tool for the Team Kan bot on a
-#  dedicated server / VPS (Ubuntu/Debian). This script performs a full install
-#  (nginx + PHP-FPM + MariaDB + SSL + webhook) and, after installation, also
-#  works as a command-line management panel.
+#  install.sh — Remote installer and management CLI for the Team Kan bot.
 #
-#  Usage:
-#    sudo bash install.sh            Install (first run) or open the management menu (later runs)
-#    sudo bash install.sh install    Force running the install flow from scratch
-#    sudo bash install.sh menu       Open the management menu directly
+#  Designed to be run either:
+#    A) Remotely, straight from GitHub (no local files needed):
+#         curl -sL https://raw.githubusercontent.com/kiankan/kan-team-extractor/main/install.sh \
+#           | sudo bash -s -- install --domain=bot.example.com --token=BOT_TOKEN --admin=ADMIN_ID
+#
+#    B) Locally, after it has been installed once (installed as /usr/local/bin/kanbot):
+#         sudo kanbot                Open the interactive management menu
+#         sudo kanbot menu           Same as above
+#         sudo kanbot update         Pull the latest code from GitHub and redeploy
+#         sudo kanbot info           Show install info (domain, panel URL, DB, ...)
+#         sudo kanbot status         Show service status
+#         sudo kanbot restart        Restart all related services
+#         sudo kanbot uninstall      Full removal (asks for confirmation)
+#
+#  Since installs launched via `curl | sudo bash` have no real stdin to read
+#  answers from, `install` and `uninstall` accept flags instead of prompts
+#  when there's no interactive terminal attached. See usage() below.
 # ==============================================================================
 set -uo pipefail
 
@@ -24,11 +34,18 @@ info() { echo -e "${C_CYAN}➜${C_RESET} $1"; }
 warn() { echo -e "${C_YELLOW}⚠${C_RESET} $1"; }
 title(){ echo -e "\n${C_BOLD}${C_BLUE}== $1 ==${C_RESET}"; }
 
+# ------------------------------------------------------------------- repo ---
+REPO_URL="https://github.com/kiankan/kan-team-extractor"
+REPO_BRANCH="main"
+INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/kiankan/kan-team-extractor/${REPO_BRANCH}/install.sh"
+
 CONF_DIR="/etc/teamkan-bot"
 CONF_FILE="$CONF_DIR/install.conf"
+PERSIST_SCRIPT_PATH="$CONF_DIR/install.sh"
 BACKUP_DIR="/root/teamkan-backups"
-SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
-SRC_DIR="$(cd "$(dirname "$SELF_PATH")" && pwd)"
+# SELF_PATH may not resolve to a real file when run via curl|bash — never rely
+# on it for anything critical, only as a best-effort fallback.
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
 
 require_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -44,9 +61,83 @@ require_apt() {
     fi
 }
 
-pause() { read -rp "Press Enter to continue..." _; }
+pause() { read -rp "Press Enter to continue..." _ < /dev/tty 2>/dev/null || read -rp "Press Enter to continue..." _; }
 
 rand_pass() { openssl rand -hex 16; }
+
+# Reads a line of interactive input even when the script itself was piped in
+# via `curl | sudo bash` (stdin in that case is the script source, not the
+# keyboard). /dev/tty is still the real terminal as long as one is attached,
+# so we read from there instead. Usage: tty_read "Prompt: " VARNAME [silent]
+tty_read() {
+    local __prompt="$1" __var="$2" __silent="${3:-}"
+    if [[ ! -r /dev/tty ]]; then
+        err "No interactive terminal available to read input for: $__prompt"
+        err "Re-run with the appropriate flags instead (see: install.sh --help)."
+        exit 1
+    fi
+    if [[ "$__silent" == "silent" ]]; then
+        read -rsp "$__prompt" "$__var" < /dev/tty; echo
+    else
+        read -rp "$__prompt" "$__var" < /dev/tty
+    fi
+}
+
+usage() {
+    cat <<USAGE
+Usage:
+  sudo bash install.sh install                          Interactive install (asks questions)
+  sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--email=E]
+                                                          Unattended install (no questions asked)
+  sudo bash install.sh update
+  sudo bash install.sh info
+  sudo bash install.sh status
+  sudo bash install.sh restart
+  sudo bash install.sh uninstall [--yes]
+  sudo bash install.sh menu
+
+Remote one-liner (no local files needed) — interactive, asks questions
+one by one just like a local run:
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- install
+
+Remote one-liner, fully unattended (all answers given up front as flags):
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- install \\
+      --domain=bot.example.com --token=BOT_TOKEN --admin=ADMIN_ID [--email=you@example.com]
+
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- update
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- info
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- restart
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- uninstall --yes
+USAGE
+}
+
+# ==============================================================================
+#  Fetching source from GitHub (used by both install and update)
+# ==============================================================================
+
+# Downloads the project source into a fresh temp dir and sets FETCHED_SRC_DIR.
+fetch_source() {
+    title "Downloading source from GitHub ($REPO_URL, branch: $REPO_BRANCH)"
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+
+    if command -v git >/dev/null 2>&1 \
+        && git clone --depth 1 --branch "$REPO_BRANCH" "${REPO_URL}.git" "$tmp_dir" >/tmp/teamkan_clone.log 2>&1; then
+        ok "Source cloned via git."
+    else
+        warn "git clone unavailable or failed; falling back to tarball download."
+        rm -rf "$tmp_dir"; tmp_dir="$(mktemp -d)"
+        local tarball_url="${REPO_URL}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
+        local tarball_file="/tmp/teamkan_src_$$.tar.gz"
+        curl -fsSL "$tarball_url" -o "$tarball_file" 2>/tmp/teamkan_dl.log \
+            || { err "Failed to download source from $tarball_url (details: /tmp/teamkan_dl.log)"; exit 1; }
+        tar xzf "$tarball_file" -C "$tmp_dir" --strip-components=1 \
+            || { err "Failed to extract source archive."; exit 1; }
+        rm -f "$tarball_file"
+        ok "Source downloaded via tarball."
+    fi
+    FETCHED_SRC_DIR="$tmp_dir"
+}
 
 # ==============================================================================
 #  Install section
@@ -54,39 +145,73 @@ rand_pass() { openssl rand -hex 16; }
 
 collect_inputs() {
     title "Collecting install information"
-    read -rp "Domain already pointed at this server (e.g. bot.example.com): " DOMAIN
-    while [[ -z "$DOMAIN" ]]; do read -rp "Domain cannot be empty. Enter it again: " DOMAIN; done
+    tty_read "Domain already pointed at this server (e.g. bot.example.com): " DOMAIN
+    while [[ -z "$DOMAIN" ]]; do tty_read "Domain cannot be empty. Enter it again: " DOMAIN; done
 
-    read -rp "Bot token (from @BotFather): " BOT_TOKEN
-    while [[ -z "$BOT_TOKEN" ]]; do read -rp "Token cannot be empty. Enter it again: " BOT_TOKEN; done
+    tty_read "Bot token (from @BotFather): " BOT_TOKEN
+    while [[ -z "$BOT_TOKEN" ]]; do tty_read "Token cannot be empty. Enter it again: " BOT_TOKEN; done
 
-    read -rp "Numeric ID of the main admin (from @userinfobot): " ADMIN_ID
-    while ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; do read -rp "Must be numeric only. Enter it again: " ADMIN_ID; done
+    tty_read "Numeric ID of the main admin (from @userinfobot): " ADMIN_ID
+    while ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; do tty_read "Must be numeric only. Enter it again: " ADMIN_ID; done
 
-    read -rp "Your email for the SSL certificate (Let's Encrypt) [optional, Enter to skip]: " SSL_EMAIL
+    tty_read "Your email for the SSL certificate (Let's Encrypt) [optional, Enter to skip]: " SSL_EMAIL
 
-    DB_NAME="teamkanbot"
-    DB_USER="teamkanbot"
-    DB_PASS="$(rand_pass)"
-    WEBROOT="/var/www/$DOMAIN"
-
+    finalize_install_vars
     echo
     info "Summary:"
     echo "  Domain:      $DOMAIN"
     echo "  Web root:    $WEBROOT"
     echo "  DB name:     $DB_NAME"
-    read -rp "Does everything look right? Continue? [Y/n]: " CONFIRM
+    tty_read "Does everything look right? Continue? [Y/n]: " CONFIRM
     if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
         err "Installation cancelled."
         exit 1
     fi
 }
 
+# Non-interactive input path: parses --domain= --token= --admin= --email=
+parse_install_args() {
+    DOMAIN=""; BOT_TOKEN=""; ADMIN_ID=""; SSL_EMAIL=""
+    for arg in "$@"; do
+        case "$arg" in
+            --domain=*) DOMAIN="${arg#*=}" ;;
+            --token=*)  BOT_TOKEN="${arg#*=}" ;;
+            --admin=*)  ADMIN_ID="${arg#*=}" ;;
+            --email=*)  SSL_EMAIL="${arg#*=}" ;;
+            *) warn "Unknown option ignored: $arg" ;;
+        esac
+    done
+
+    local missing=()
+    [[ -z "$DOMAIN" ]]    && missing+=("--domain")
+    [[ -z "$BOT_TOKEN" ]] && missing+=("--token")
+    [[ -z "$ADMIN_ID" ]]  && missing+=("--admin")
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        err "Missing required options: ${missing[*]}"
+        usage
+        exit 1
+    fi
+    if ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; then
+        err "--admin must be numeric only."
+        exit 1
+    fi
+
+    finalize_install_vars
+    info "Installing with: domain=$DOMAIN admin=$ADMIN_ID email=${SSL_EMAIL:-<none>}"
+}
+
+finalize_install_vars() {
+    DB_NAME="teamkanbot"
+    DB_USER="teamkanbot"
+    DB_PASS="$(rand_pass)"
+    WEBROOT="/var/www/$DOMAIN"
+}
+
 install_packages() {
     title "Installing prerequisites (nginx, PHP-FPM, MariaDB, ...)"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq nginx mariadb-server curl unzip zip cron \
+    apt-get install -y -qq nginx mariadb-server curl git unzip zip cron \
         php-fpm php-mysql php-curl php-mbstring php-xml php-zip php-cli \
         certbot python3-certbot-nginx >/tmp/teamkan_apt.log 2>&1 \
         || { err "Package installation failed. Details: /tmp/teamkan_apt.log"; exit 1; }
@@ -129,14 +254,16 @@ SQL
     ok "Database '$DB_NAME' and user '$DB_USER' created."
 }
 
+# Copies the fetched GitHub source ($FETCHED_SRC_DIR) into $WEBROOT.
 deploy_files() {
     title "Copying project files to $WEBROOT"
     mkdir -p "$WEBROOT"
-    # Copy every file from this repo except install.sh itself
     shopt -s dotglob nullglob
-    for item in "$SRC_DIR"/*; do
+    for item in "$FETCHED_SRC_DIR"/*; do
         base="$(basename "$item")"
-        [[ "$base" == "install.sh" ]] && continue
+        case "$base" in
+            install.sh|config.php|README.md|installer|.git|.github) continue ;;
+        esac
         cp -r "$item" "$WEBROOT/"
     done
     shopt -u dotglob nullglob
@@ -209,7 +336,7 @@ setup_ssl() {
         SITE_URL="https://$DOMAIN"
     else
         warn "Getting SSL failed (details: /tmp/teamkan_certbot.log). Continuing on HTTP for now;"
-        warn "once the domain's DNS is set up correctly, use the 'Renew/get SSL certificate' option from the management menu again."
+        warn "once the domain's DNS is set up correctly, run 'kanbot' -> option to renew SSL, or 'sudo kanbot menu'."
         warn "Note: Telegram only accepts HTTPS for webhooks, so the bot won't be reachable until SSL is set up."
         SITE_URL="http://$DOMAIN"
     fi
@@ -239,17 +366,28 @@ CONF
     chmod 600 "$CONF_FILE"
 }
 
+# Saves a persistent copy of this management script so 'kanbot' keeps working
+# later, regardless of whether the original install ran from a local file or
+# straight off a curl|bash pipe (where there is no on-disk script to symlink).
 install_management_symlink() {
-    ln -sf "$SELF_PATH" /usr/local/bin/kanbot 2>/dev/null
-    chmod +x "$SELF_PATH"
+    mkdir -p "$CONF_DIR"
+    if curl -fsSL "$INSTALL_SCRIPT_URL" -o "$PERSIST_SCRIPT_PATH" 2>/tmp/teamkan_selfdl.log; then
+        chmod +x "$PERSIST_SCRIPT_PATH"
+    elif [[ -n "$SELF_PATH" && -f "$SELF_PATH" ]]; then
+        cp "$SELF_PATH" "$PERSIST_SCRIPT_PATH"
+        chmod +x "$PERSIST_SCRIPT_PATH"
+    else
+        warn "Could not save a persistent copy of the management script; 'kanbot' command will not be available."
+        return
+    fi
+    ln -sf "$PERSIST_SCRIPT_PATH" /usr/local/bin/kanbot
+    ok "Management command installed: run 'sudo kanbot' anytime to open the menu."
 }
 
-run_install() {
-    require_root
-    require_apt
-    collect_inputs
+do_install_steps() {
     install_packages
     setup_database
+    fetch_source
     deploy_files
     create_tables
     setup_nginx
@@ -257,12 +395,27 @@ run_install() {
     set_webhook
     save_conf
     install_management_symlink
+    [[ -n "${FETCHED_SRC_DIR:-}" ]] && rm -rf "$FETCHED_SRC_DIR"
 
     title "Installation complete 🎉"
     echo -e "${C_GREEN}Web panel URL:${C_RESET} ${SITE_URL}/webpanel.php"
     echo -e "${C_GREEN}Default panel password:${C_RESET} admin  ${C_YELLOW}(change it right now from the 'Security' tab)${C_RESET}"
-    echo -e "${C_GREEN}Managing it later:${C_RESET} from now on, run ${C_BOLD}kanbot${C_RESET} (or re-run this same script) to open the management menu."
+    echo -e "${C_GREEN}Managing it later:${C_RESET} run ${C_BOLD}sudo kanbot${C_RESET} to open the management menu,"
+    echo -e "            or ${C_BOLD}sudo kanbot update|info|status|restart|uninstall${C_RESET} directly."
     echo -e "${C_GREEN}Install info saved to:${C_RESET} $CONF_FILE"
+}
+
+run_install() {
+    require_root
+    require_apt
+    if [[ $# -eq 0 ]]; then
+        # No flags given: ask questions interactively. This reads from
+        # /dev/tty, so it works fine even when launched via curl | sudo bash.
+        collect_inputs
+    else
+        parse_install_args "$@"
+    fi
+    do_install_steps
 }
 
 # ==============================================================================
@@ -337,7 +490,7 @@ mgmt_rewebhook() {
 
 mgmt_reset_panel_password() {
     title "Resetting the web panel password"
-    read -rsp "Enter the new panel password: " NEWPASS; echo
+    tty_read "Enter the new panel password: " NEWPASS silent
     if [[ -z "$NEWPASS" ]]; then err "Password cannot be empty."; return; fi
     local hash
     hash="$(php -r "echo password_hash('$NEWPASS', PASSWORD_DEFAULT);")"
@@ -354,67 +507,29 @@ mgmt_ssl_renew() {
         || err "SSL operation failed. Check the certbot log (certbot certificates)."
 }
 
+# Fully automated: pulls the latest code straight from GitHub and redeploys.
+# No prompts, so this works the same locally or via curl | sudo bash -s -- update.
 mgmt_update_bot() {
     title "Update bot files"
-    info "Upload the new source to this server first — either a plain folder (e.g. via scp -r)"
-    info "or a .zip / .tar.gz archive — then enter its path below. config.php will NOT be touched."
-    read -rp "Path to the new source (folder or archive): " SRC_PATH
+    fetch_source
 
-    if [[ ! -e "$SRC_PATH" ]]; then
-        err "Path not found: $SRC_PATH"
-        return
+    if [[ ! -f "$FETCHED_SRC_DIR/bot.php" ]]; then
+        err "bot.php was not found in the downloaded source; aborting update."
+        rm -rf "$FETCHED_SRC_DIR"
+        return 1
     fi
 
-    local tmp_dir=""
-    local new_src=""
-
-    if [[ -d "$SRC_PATH" ]]; then
-        # مسیر یک پوشه‌ی معمولیه؛ مستقیم از همون استفاده می‌کنیم
-        new_src="$SRC_PATH"
-    else
-        tmp_dir="$(mktemp -d)"
-        case "$SRC_PATH" in
-            *.zip)
-                command -v unzip >/dev/null 2>&1 || apt-get install -y -qq unzip >/dev/null 2>&1
-                unzip -oq "$SRC_PATH" -d "$tmp_dir" || { err "Failed to extract the zip file."; rm -rf "$tmp_dir"; return; }
-                ;;
-            *.tar.gz|*.tgz)
-                tar xzf "$SRC_PATH" -C "$tmp_dir" || { err "Failed to extract the tar.gz file."; rm -rf "$tmp_dir"; return; }
-                ;;
-            *)
-                err "Unsupported path: must be an existing folder, or a .zip / .tar.gz file."
-                rm -rf "$tmp_dir"
-                return
-                ;;
-        esac
-        new_src="$tmp_dir"
-
-        # If the archive has a single top-level folder, step into it
-        local entries=()
-        while IFS= read -r -d '' e; do entries+=("$e"); done < <(find "$new_src" -mindepth 1 -maxdepth 1 -print0)
-        if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
-            new_src="${entries[0]}"
-        fi
-    fi
-
-    if [[ ! -f "$new_src/bot.php" ]]; then
-        err "bot.php was not found in '$new_src'; this doesn't look like a valid project update."
-        [[ -n "$tmp_dir" ]] && rm -rf "$tmp_dir"
-        return
-    fi
-
-    # Back up the current web root before overwriting anything
     mkdir -p "$BACKUP_DIR"
     local backup_file="$BACKUP_DIR/webroot_before_update_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
     tar czf "$backup_file" -C "$(dirname "$WEBROOT")" "$(basename "$WEBROOT")" 2>/dev/null
     ok "Current files backed up to: $backup_file"
 
-    # Copy the new files over, but never touch config.php or install.sh
     shopt -s dotglob nullglob
-    for item in "$new_src"/*; do
+    for item in "$FETCHED_SRC_DIR"/*; do
         base="$(basename "$item")"
-        [[ "$base" == "config.php" ]] && continue
-        [[ "$base" == "install.sh" ]] && continue
+        case "$base" in
+            install.sh|config.php|README.md|installer|.git|.github) continue ;;
+        esac
         cp -rf "$item" "$WEBROOT/"
     done
     shopt -u dotglob nullglob
@@ -423,23 +538,28 @@ mgmt_update_bot() {
     find "$WEBROOT" -type d -exec chmod 750 {} \;
     find "$WEBROOT" -type f -exec chmod 640 {} \;
 
-    # Apply any new/changed database tables
     php "$WEBROOT/table.php" >/tmp/teamkan_tables.log 2>&1
 
-    [[ -n "$tmp_dir" ]] && rm -rf "$tmp_dir"
+    rm -rf "$FETCHED_SRC_DIR"
 
     mgmt_restart_bot
-    ok "Bot updated successfully. config.php was left untouched."
+    ok "Bot updated successfully to the latest version on '$REPO_BRANCH'. config.php was left untouched."
 }
 
+# $1 may be --yes to skip the confirmation prompt (needed for curl|bash runs).
 mgmt_uninstall() {
+    local force="${1:-}"
     title "Full uninstall"
     warn "This will permanently delete the web root ($WEBROOT), the database ($DB_NAME), and the Nginx config for $DOMAIN."
-    read -rp "Type 'DELETE' to confirm: " CONFIRM
-    if [[ "$CONFIRM" != "DELETE" ]]; then
-        info "Cancelled."
-        return
+
+    if [[ "$force" != "--yes" ]]; then
+        tty_read "Type 'DELETE' to confirm: " CONFIRM
+        if [[ "$CONFIRM" != "DELETE" ]]; then
+            info "Cancelled."
+            return
+        fi
     fi
+
     rm -rf "$WEBROOT"
     rm -f "/etc/nginx/sites-enabled/$DOMAIN" "/etc/nginx/sites-available/$DOMAIN"
     systemctl reload nginx 2>/dev/null
@@ -460,7 +580,7 @@ show_menu() {
         echo " 1) Service status"
         echo " 2) Restart bot (PHP-FPM + Nginx)"
         echo " 3) Restart all services (incl. MariaDB)"
-        echo " 4) Update bot (deploy new code)"
+        echo " 4) Update bot (pull latest from GitHub)"
         echo " 5) Show install info"
         echo " 6) Manual database backup"
         echo " 7) Reset Telegram webhook"
@@ -491,10 +611,31 @@ show_menu() {
 #  Entry point
 # ==============================================================================
 main() {
-    local mode="${1:-auto}"
-    case "$mode" in
-        install) require_root; require_apt; run_install ;;
-        menu)    require_root; show_menu ;;
+    local cmd="${1:-auto}"
+    [[ $# -gt 0 ]] && shift
+
+    case "$cmd" in
+        install)
+            run_install "$@"
+            ;;
+        update)
+            require_root; load_conf; mgmt_update_bot
+            ;;
+        info)
+            require_root; load_conf; mgmt_info
+            ;;
+        status)
+            require_root; load_conf; mgmt_status
+            ;;
+        restart)
+            require_root; load_conf; mgmt_restart_all
+            ;;
+        uninstall)
+            require_root; load_conf; mgmt_uninstall "${1:-}"
+            ;;
+        menu)
+            require_root; show_menu
+            ;;
         auto)
             require_root
             if [[ -f "$CONF_FILE" ]]; then
@@ -504,11 +645,15 @@ main() {
                 run_install
             fi
             ;;
+        -h|--help|help)
+            usage
+            ;;
         *)
-            echo "Usage: $0 [install|menu]"
+            err "Unknown command: $cmd"
+            usage
             exit 1
             ;;
     esac
 }
 
-main "${1:-}"
+main "$@"
