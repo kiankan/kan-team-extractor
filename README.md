@@ -17,8 +17,9 @@
 
 ## نصب برای سرور 
 
-curl -sL https://raw.githubusercontent.com/kiankan/kan-team-extractor/main/install.sh \
-  | sudo bash -s -- install
+```bash
+curl -sL https://raw.githubusercontent.com/kiankan/kan-team-extractor/main/install.sh | sudo bash -s -- install
+```
 ## نصب برای هاست
 1. فایل‌ها را آپلود کنید.
 2. `config.php` را پر کنید (توکن ربات، دیتابیس، `ADMIN_ID`).
