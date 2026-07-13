@@ -81,6 +81,14 @@ tty_read() {
     else
         read -rp "$__prompt" "$__var" < /dev/tty
     fi
+    # Trim leading/trailing whitespace and stray \r (common with copy-paste)
+    # so an invisible extra character doesn't silently break a comparison
+    # like checking for the exact word DELETE.
+    local __val="${!__var}"
+    __val="${__val%$'\r'}"
+    __val="${__val#"${__val%%[![:space:]]*}"}"
+    __val="${__val%"${__val##*[![:space:]]}"}"
+    printf -v "$__var" '%s' "$__val"
 }
 
 usage() {
