@@ -1925,7 +1925,7 @@ try {
             $botPing      = round((microtime(true) - $pingStart) * 1000);
             $totalUsers   = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
             $blockedUsers = $pdo->query("SELECT COUNT(*) FROM users WHERE is_blocked=1")->fetchColumn();
-            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v2.3 team kan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
+            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v1.1 team kan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
             exit;
         }
 
