@@ -215,7 +215,9 @@ function tgApi(string $method, array $params = [], int $timeout = 15): array {
 // بکاپ‌گیری (هماهنگ با bot.php)
 // ------------------------------------------------------------------
 function createDbBackupFile(PDO $pdo): string {
-    $tables  = ['users', 'user_states', 'settings', 'admins', 'extractions'];
+    // نکته: extractions عمداً اینجا نیست؛ لینک ساب کاربران فقط ۵ دقیقه معتبره
+    // و نباید داخل بکاپ‌های دیتابیس نگه‌داری بشه (هماهنگ با bot.php).
+    $tables  = ['users', 'user_states', 'settings', 'admins'];
     $sqlDump = "-- DB Backup\n-- Time: " . date('Y-m-d H:i:s') . "\n\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n\n";
     foreach ($tables as $table) {
         try {
@@ -233,8 +235,24 @@ function createDbBackupFile(PDO $pdo): string {
     file_put_contents($fileName, $sqlDump);
     return $fileName;
 }
-// نکته: تابع بکاپ سورس (createSourceBackupFile) به‌طور کامل از پروژه حذف شد.
-// بکاپ‌گیری فقط از دیتابیس انجام می‌شود (createDbBackupFile).
+function createSourceBackupFile(): string {
+    $zipFile = sys_get_temp_dir() . '/source_backup_' . date('Y-m-d_H-i-s') . '_' . bin2hex(random_bytes(4)) . '.zip';
+    if (class_exists('ZipArchive')) {
+        $zip = new ZipArchive();
+        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
+            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__), RecursiveIteratorIterator::LEAVES_ONLY);
+            foreach ($files as $file) {
+                if (!$file->isDir()) {
+                    $filePath     = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
+                    if ($relativePath !== 'config.php') $zip->addFile($filePath, $relativePath);
+                }
+            }
+            $zip->close();
+        }
+    }
+    return $zipFile;
+}
 
 // توکن کرون مخصوص همین نصب: از روی BOT_TOKEN شما ساخته می‌شود (نه یک مقدار
 // ثابت که در همه‌ی نصب‌های این کد یکسان باشد). دقیقاً همان مقداری است که
@@ -337,6 +355,7 @@ function getButtonRegistry(): array {
         'btn_admin_settingspanel' => ['label' => '⚙️ پنل تنظیمات کامل',       'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_settings'      => ['label' => '⚙️ تنظیمات',                'menu' => 'admin_menu'],
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'menu' => 'admin_menu', 'backup_sub_only' => true],
+        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'menu' => 'admin_menu', 'backup_sub_only' => true],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',           'menu' => 'admin_menu', 'supadmin_only' => true, 'backup_sub_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'menu' => 'admin_menu'],
 
@@ -356,7 +375,7 @@ function getButtonRegistry(): array {
 // کلیدهایی که هرگز نباید مستقیم در چیدمان سطح اول «پنل مدیریت» ظاهر شوند
 // (دقیقاً هماهنگ با getBackupSubOnlyKeys() در bot.php)
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
 }
 
 function defaultLayouts(): array {
@@ -367,8 +386,6 @@ function defaultLayouts(): array {
             ['btn_admin_broadcast', 'btn_admin_status'],
             ['btn_admin_lock', 'btn_admin_admins'],
             ['btn_admin_premium', 'btn_admin_settings'],
-            ['btn_admin_reports'],
-            ['btn_admin_webpanel', 'btn_admin_settingspanel'],
             ['btn_admin_cron', 'btn_admin_backup'],
             ['btn_admin_back']
         ],
@@ -432,11 +449,17 @@ if (!isset($_GET['logout']) && !panelIpAccessAllowed($pdo, $CLIENT_IP)) {
 // ------------------------------------------------------------------
 // دانلود مستقیم بکاپ کامل (باید قبل از هر خروجی دیگری هندل شود)
 // ------------------------------------------------------------------
-if (isset($_GET['api']) && $_GET['api'] === 'download_db_backup') {
+if (isset($_GET['api']) && in_array($_GET['api'], ['download_db_backup', 'download_source_backup'], true)) {
     if (empty($_SESSION['panel_auth'])) { http_response_code(401); exit('Unauthorized'); }
-    $file = createDbBackupFile($pdo);
-    $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
-    header('Content-Type: application/sql');
+    if ($_GET['api'] === 'download_db_backup') {
+        $file = createDbBackupFile($pdo);
+        $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
+        header('Content-Type: application/sql');
+    } else {
+        $file = createSourceBackupFile();
+        $downloadName = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
+        header('Content-Type: application/zip');
+    }
     if (!file_exists($file)) { http_response_code(500); exit('Backup failed'); }
     header('Content-Disposition: attachment; filename="' . $downloadName . '"');
     header('Content-Length: ' . filesize($file));
@@ -776,7 +799,6 @@ if (isset($_GET['api'])) {
         $totalUsers   = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
         $blockedUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE is_blocked=1")->fetchColumn();
         $totalAdmins  = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE is_admin=1")->fetchColumn();
-        $totalExtractions = (int)$pdo->query("SELECT COUNT(*) FROM extractions")->fetchColumn();
         echo json_encode([
             'ok' => true,
             'ping' => $ping,
@@ -785,79 +807,11 @@ if (isset($_GET['api'])) {
             'total_users' => $totalUsers,
             'blocked_users' => $blockedUsers,
             'total_admins' => $totalAdmins,
-            'total_extractions' => $totalExtractions,
             'public_mode' => getSetting($pdo, 'public_mode', '0'),
             'report_status' => getSetting($pdo, 'report_status', 'off'),
             'fj_status' => getSetting($pdo, 'fj_status', 'off'),
             'cron_interval' => getSetting($pdo, 'cron_interval', '300'),
         ]); exit;
-    }
-
-    // ================= پنل استخراج (مدیریت استخراج‌های کاربران) =================
-    if ($api === 'list_extractions') {
-        $page  = max(0, (int)($_GET['page'] ?? 0));
-        $q     = trim((string)($_GET['q'] ?? ''));
-        $status = (string)($_GET['status'] ?? 'all'); // all | active | expired
-        $limit = 15; $offset = $page * $limit;
-
-        $where  = [];
-        $params = [];
-        if ($q !== '' && preg_match('/^\d+$/', $q)) { $where[] = 'user_id = ?'; $params[] = $q; }
-        elseif ($q !== '') { $where[] = 'token LIKE ?'; $params[] = '%' . $q . '%'; }
-
-        $now = time();
-        if ($status === 'active')  $where[] = '(expire_ts = 0 OR expire_ts > ' . $now . ')';
-        if ($status === 'expired') $where[] = '(expire_ts > 0 AND expire_ts <= ' . $now . ')';
-
-        $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-
-        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM extractions $whereSql");
-        $countStmt->execute($params);
-        $total = (int)$countStmt->fetchColumn();
-
-        $stmt = $pdo->prepare("SELECT * FROM extractions $whereSql ORDER BY created_at DESC LIMIT ? OFFSET ?");
-        $bindIdx = 1;
-        foreach ($params as $p) { $stmt->bindValue($bindIdx++, $p); }
-        $stmt->bindValue($bindIdx++, $limit, PDO::PARAM_INT);
-        $stmt->bindValue($bindIdx++, $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $rows = $stmt->fetchAll();
-
-        $out = [];
-        foreach ($rows as $r) {
-            $expireTs = (int)($r['expire_ts'] ?? 0);
-            $isActive = ($expireTs === 0 || $expireTs > $now) && (
-                (float)($r['total_bytes'] ?? 0) <= 0 || ((float)($r['total_bytes'] ?? 0) - (float)($r['used_bytes'] ?? 0)) > 0
-            );
-            $out[] = [
-                'token'      => $r['token'],
-                'user_id'    => (string)$r['user_id'],
-                'total_configs' => (int)($r['total_configs'] ?? 0),
-                'total_bytes'   => (float)($r['total_bytes'] ?? 0),
-                'used_bytes'    => (float)($r['used_bytes'] ?? 0),
-                'expire_ts'     => $expireTs,
-                'active'        => $isActive,
-                'created_at'    => jdate('Y/m/d H:i', safe_timestamp($r['created_at'] ?? '')),
-                'view_url'      => currentPanelUrl('sub_view.php') . '?id=' . $r['token'],
-            ];
-        }
-        echo json_encode(['ok' => true, 'extractions' => $out, 'total' => $total, 'page' => $page, 'limit' => $limit]); exit;
-    }
-    if ($api === 'extraction_stats') {
-        $now = time();
-        $total   = (int)$pdo->query("SELECT COUNT(*) FROM extractions")->fetchColumn();
-        $active  = (int)$pdo->query("SELECT COUNT(*) FROM extractions WHERE expire_ts = 0 OR expire_ts > $now")->fetchColumn();
-        $expired = $total - $active;
-        $uniqueUsers = (int)$pdo->query("SELECT COUNT(DISTINCT user_id) FROM extractions")->fetchColumn();
-        $totalConfigs = (int)$pdo->query("SELECT COALESCE(SUM(total_configs),0) FROM extractions")->fetchColumn();
-        echo json_encode(['ok' => true, 'total' => $total, 'active' => $active, 'expired' => $expired, 'unique_users' => $uniqueUsers, 'total_configs' => $totalConfigs]); exit;
-    }
-    if ($api === 'delete_extraction') {
-        $token = preg_replace('/[^a-f0-9]/', '', (string)($body['token'] ?? ''));
-        if ($token === '') { echo json_encode(['ok' => false, 'error' => 'empty']); exit; }
-        $stmt = $pdo->prepare("DELETE FROM extractions WHERE token = ?");
-        $stmt->execute([$token]);
-        echo json_encode(['ok' => true, 'deleted' => $stmt->rowCount() > 0]); exit;
     }
 
     // ================= رمز عبور پنل =================
@@ -1303,13 +1257,12 @@ button.act:active { transform: scale(.96); }
 
 .field-row { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
 .field-row label { flex:0 0 150px; font-size:12.5px; color:var(--muted); font-weight:700; }
-input[type=text], input[type=password], input[type=number], textarea, select {
+input[type=text], input[type=password], input[type=number], textarea {
     flex:1; min-width:180px; padding:12px 14px; border-radius:12px; border:1px solid var(--glass-border);
     background:rgba(0,0,0,.28); color:var(--text); font-size:13.5px; font-family:inherit; transition:.2s var(--ease);
 }
-select { cursor:pointer; }
 textarea { resize:vertical; min-height:80px; width:100%; }
-input:focus, textarea:focus, select:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 4px rgba(10,132,255,.16); background:rgba(0,0,0,.4); }
+input:focus, textarea:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 4px rgba(10,132,255,.16); background:rgba(0,0,0,.4); }
 .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:6px 14px; border-radius:999px; font-weight:700; }
 .pill.on { background:rgba(48,209,88,.15); color:#7ee8a8; border:1px solid rgba(48,209,88,.3); }
 .pill.off { background:rgba(255,69,58,.15); color:#ff9d97; border:1px solid rgba(255,69,58,.3); }
@@ -1368,7 +1321,6 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
     <button class="tab-btn" data-tab="cron">⏱ کرون</button>
     <button class="tab-btn" data-tab="admins">👮‍♂️ مدیران</button>
     <button class="tab-btn" data-tab="users">👥 کاربران</button>
-    <button class="tab-btn" data-tab="extractions">📡 مدیریت استخراج‌ها</button>
     <button class="tab-btn" data-tab="general">🛠 تنظیمات عمومی</button>
     <button class="tab-btn" data-tab="broadcast">📣 پیام همگانی</button>
     <button class="tab-btn" data-tab="backup">💾 بکاپ</button>
@@ -1404,7 +1356,6 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <div class="glass dash-card accent-purple"><div class="dash-icon">👮‍♂️</div><div class="dash-num" id="d-total-admins">—</div><div class="dash-label">مدیران</div></div>
         <div class="glass dash-card accent-green"><div class="dash-icon">⏱</div><div class="dash-num" id="d-ping">—</div><div class="dash-label">پینگ ربات (ms)</div></div>
         <div class="glass dash-card accent-orange"><div class="dash-icon">🤖</div><div class="dash-num" id="d-bot-status" style="font-size:16px;">—</div><div class="dash-label">وضعیت اتصال به تلگرام</div></div>
-        <div class="glass dash-card accent-blue"><div class="dash-icon">📡</div><div class="dash-num" id="d-total-extractions">—</div><div class="dash-label">کل استخراج‌های ثبت‌شده</div></div>
     </div>
 
     <div class="glass box">
@@ -1498,7 +1449,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <button class="act btn-success" onclick="saveLayout('admin_menu')">💾 ذخیره چیدمان</button>
         <button class="act btn-danger" onclick="resetLayout('admin_menu')">↩️ بازگشت به پیش‌فرض</button>
     </div>
-    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این گزینه‌ها دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
+    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس»، «بکاپ سورس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این سه گزینه دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
 </div>
 
 <div class="menu-section" id="section-sub_menu">
@@ -1662,32 +1613,6 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
     </div>
 </div>
 
-<!-- ================= مدیریت استخراج‌ها ================= -->
-<div class="menu-section" id="section-extractions">
-    <div class="dash-grid">
-        <div class="glass dash-card accent-blue"><div class="dash-icon">📡</div><div class="dash-num" id="ex-total">—</div><div class="dash-label">کل استخراج‌ها</div></div>
-        <div class="glass dash-card accent-green"><div class="dash-icon">✅</div><div class="dash-num" id="ex-active">—</div><div class="dash-label">فعال</div></div>
-        <div class="glass dash-card accent-pink"><div class="dash-icon">⛔️</div><div class="dash-num" id="ex-expired">—</div><div class="dash-label">منقضی‌شده</div></div>
-        <div class="glass dash-card accent-purple"><div class="dash-icon">👥</div><div class="dash-num" id="ex-users">—</div><div class="dash-label">کاربران دارای استخراج</div></div>
-        <div class="glass dash-card accent-orange"><div class="dash-icon">🧩</div><div class="dash-num" id="ex-configs">—</div><div class="dash-label">مجموع کانفیگ‌ها</div></div>
-    </div>
-    <div class="search-box"><input type="text" id="ex-search" placeholder="جستجو با آیدی عددی کاربر یا بخشی از توکن..." onkeydown="if(event.key==='Enter') loadExtractions(0)"><span class="search-icon">🔍</span></div>
-    <div class="glass box">
-        <div class="field-row">
-            <label>فیلتر وضعیت</label>
-            <select id="ex-status-filter" onchange="loadExtractions(0)">
-                <option value="all">همه</option>
-                <option value="active">فقط فعال</option>
-                <option value="expired">فقط منقضی‌شده</option>
-            </select>
-            <button class="act btn-ghost" onclick="loadExtractions(0); loadExtractionStats();">🔄 بروزرسانی</button>
-        </div>
-        <h3>📋 لیست استخراج‌های ثبت‌شده</h3>
-        <div id="extractions-table-wrap"><div class="empty-note">در حال بارگذاری...</div></div>
-        <div class="pager" id="extractions-pager"></div>
-    </div>
-</div>
-
 <!-- ================= تنظیمات عمومی ================= -->
 <div class="menu-section" id="section-general">
     <div class="glass box">
@@ -1725,6 +1650,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <h3>💾 بکاپ کامل (دستی)</h3>
         <div class="actions">
             <a class="act btn-primary" href="?api=download_db_backup">💾 دانلود بکاپ دیتابیس (SQL)</a>
+            <a class="act btn-success" href="?api=download_source_backup">📦 دانلود بکاپ سورس (ZIP)</a>
         </div>
         <div class="hint">این فایل‌ها مستقیماً از سرور دانلود می‌شوند و به گروه گزارشات ارسال نمی‌گردند (برای ارسال به گروه از دکمه‌های داخل ربات در تلگرام استفاده کنید). برای بکاپ سریع فقط تنظیمات این پنل (چیدمان/رنگ/قفل کانال/گزارشات/کرون و ...) از تب 🧭 داشبورد استفاده کنید.</div>
         <div class="hint">📥 برای «ایمپورت» بکاپ SQL (بازیابی امن، فقط رکوردهای جدید)، از دکمه «📥 ایمپورت بک‌آپ» که داخل زیرمنوی «💾 بک‌آپ» در منوی «⚙️ پنل مدیریت» داخل خود ربات در تلگرام قرار دارد استفاده کنید — این عملیات (آپلود فایل .sql) از داخل تلگرام انجام می‌شود، نه از این پنل وب.</div>
@@ -1878,7 +1804,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         if (tab === 'dashboard') loadDashboard();
         if (tab === 'admins') loadAdmins();
         if (tab === 'users') loadUsers(0);
-        if (tab === 'extractions') { loadExtractionStats(); loadExtractions(0); }
     });
 });
 
@@ -2416,7 +2341,6 @@ async function loadBotStats() {
         document.getElementById('d-total-users').textContent   = toFa(data.total_users);
         document.getElementById('d-blocked-users').textContent = toFa(data.blocked_users);
         document.getElementById('d-total-admins').textContent  = toFa(data.total_admins);
-        document.getElementById('d-total-extractions').textContent = toFa(data.total_extractions);
         document.getElementById('d-ping').textContent          = toFa(data.ping);
         document.getElementById('d-bot-status').textContent    = data.bot_ok ? ('✅ @' + (data.bot_username || '')) : '❌ قطع';
 
@@ -2603,58 +2527,6 @@ async function sendDirectMessage() {
     const data = await apiPost('send_direct_message', { user_id, text });
     if (data.ok) { showToast('📤 پیام ارسال شد.', 'success'); document.getElementById('dm-text').value = ''; }
     else showToast('❌ ارسال ناموفق: ' + (data.description || 'نامعلوم'), 'error');
-}
-
-// ---------------- مدیریت استخراج‌ها ----------------
-function fmtBytesJs(bytes) {
-    bytes = Number(bytes) || 0;
-    if (bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let pow = Math.floor(Math.log(bytes) / Math.log(1024));
-    pow = Math.min(pow, units.length - 1);
-    return (bytes / Math.pow(1024, pow)).toFixed(2) + ' ' + units[pow];
-}
-async function loadExtractionStats() {
-    const data = await apiGet('extraction_stats');
-    if (!data.ok) return;
-    document.getElementById('ex-total').textContent = toFa(data.total);
-    document.getElementById('ex-active').textContent = toFa(data.active);
-    document.getElementById('ex-expired').textContent = toFa(data.expired);
-    document.getElementById('ex-users').textContent = toFa(data.unique_users);
-    document.getElementById('ex-configs').textContent = toFa(data.total_configs);
-}
-let CURRENT_EX_PAGE = 0;
-async function loadExtractions(page) {
-    CURRENT_EX_PAGE = page;
-    const q = document.getElementById('ex-search').value.trim();
-    const status = document.getElementById('ex-status-filter').value;
-    const wrap = document.getElementById('extractions-table-wrap');
-    wrap.innerHTML = '<div class="empty-note">در حال بارگذاری...</div>';
-    const data = await apiGet('list_extractions', 'page=' + page + '&q=' + encodeURIComponent(q) + '&status=' + status);
-    if (!data.ok) { wrap.innerHTML = '<div class="empty-note">خطا در دریافت لیست.</div>'; return; }
-    if (data.extractions.length === 0) { wrap.innerHTML = '<div class="empty-note">هیچ استخراجی یافت نشد.</div>'; document.getElementById('extractions-pager').innerHTML = ''; return; }
-    let html = '<table class="data-table"><thead><tr><th>کاربر</th><th>کانفیگ‌ها</th><th>حجم مصرفی</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead><tbody>';
-    data.extractions.forEach(e => {
-        const volText = e.total_bytes > 0 ? (fmtBytesJs(e.used_bytes) + ' / ' + fmtBytesJs(e.total_bytes)) : (fmtBytesJs(e.used_bytes) + ' / نامحدود');
-        html += `<tr><td><code>${e.user_id}</code></td><td>${toFa(e.total_configs)}</td><td>${volText}</td><td>${e.active ? '🟢 فعال' : '🔴 منقضی'}</td><td>${e.created_at}</td>
-        <td><a class="mini-btn mb-primary" style="text-decoration:none; display:inline-block;" href="${e.view_url}" target="_blank">🖥 مشاهده</a>
-        <button class="mini-btn mb-danger" onclick="deleteExtraction('${e.token}')">🗑 حذف</button></td></tr>`;
-    });
-    html += '</tbody></table>';
-    wrap.innerHTML = html;
-
-    const totalPages = Math.max(1, Math.ceil(data.total / data.limit));
-    let pager = '';
-    if (page > 0) pager += `<button class="mini-btn" onclick="loadExtractions(${page - 1})">⬅️ قبلی</button>`;
-    pager += `<span>صفحه ${toFa(page + 1)} از ${toFa(totalPages)} (${toFa(data.total)} استخراج)</span>`;
-    if ((page + 1) < totalPages) pager += `<button class="mini-btn" onclick="loadExtractions(${page + 1})">بعدی ➡️</button>`;
-    document.getElementById('extractions-pager').innerHTML = pager;
-}
-async function deleteExtraction(token) {
-    if (!confirm('این استخراج حذف شود؟ لینک وب مربوطه دیگر کار نخواهد کرد.')) return;
-    const data = await apiPost('delete_extraction', { token });
-    if (data.ok) { showToast('🗑 حذف شد.', 'success'); loadExtractions(CURRENT_EX_PAGE); loadExtractionStats(); }
-    else showToast('❌ خطا در حذف.', 'error');
 }
 
 // ---------------- تنظیمات عمومی ----------------
