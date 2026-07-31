@@ -1,6 +1,7 @@
 <?php
 // sub_view.php - نمایش عمومی وضعیت اشتراک (لینک قابل اشتراک‌گذاری) - نسخه‌ی خفن‌تر با تم بنفش/نئونی
 declare(strict_types=1);
+date_default_timezone_set('Asia/Tehran'); // باید هم‌راستا با bot.php باشه
 require_once 'config.php';
 
 $token = preg_replace('/[^a-f0-9]/', '', (string)($_GET['id'] ?? ''));
@@ -58,7 +59,7 @@ try {
 
 const EXTRACTION_TTL_SECONDS = 300;
 
-$stmt = $pdo->prepare("SELECT * FROM extractions WHERE token = ?");
+$stmt = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_ts FROM extractions WHERE token = ?");
 $stmt->execute([$token]);
 $row = $stmt->fetch();
 
@@ -67,7 +68,7 @@ if (!$row) { http_response_code(404); renderNotFound(); exit; }
 // نکته حریم‌خصوصی: هر لینک استخراج فقط ۵ دقیقه معتبره. اگه منقضی شده، همین‌جا
 // حذفش می‌کنیم و دقیقاً همون صفحه‌ی «یافت نشد» رو نشون می‌دیم (نه پیام جداگانه‌ی
 // «منقضی شده») تا از بیرون قابل تشخیص نباشه که این توکن قبلاً واقعاً وجود داشته یا نه.
-$createdAtTs = strtotime((string)($row['created_at'] ?? '')) ?: 0;
+$createdAtTs = (int)($row['created_at_ts'] ?? 0);
 if (time() - $createdAtTs > EXTRACTION_TTL_SECONDS) {
     $pdo->prepare("DELETE FROM extractions WHERE token = ?")->execute([$token]);
     http_response_code(404);
