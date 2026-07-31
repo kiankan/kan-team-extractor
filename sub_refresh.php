@@ -2,6 +2,7 @@
 // sub_refresh.php - اندپوینت آژاکس برای دکمه‌ی «بروزرسانی زنده» در sub_view.php
 // نسخه‌ی محکم‌شده: هر خروجی اضافه/خطای PHP رو می‌قاپه تا پاسخ همیشه JSON معتبر بمونه.
 declare(strict_types=1);
+date_default_timezone_set('Asia/Tehran'); // باید هم‌راستا با bot.php باشه
 
 // هر چیزی که قبل از موقع (Warning/Notice/BOM و ...) چاپ بشه رو می‌گیریم تا JSON کثیف نشه
 ob_start();
@@ -57,13 +58,13 @@ try {
     fail('خطای اتصال به دیتابیس: ' . $e->getMessage(), 500);
 }
 
-$stmt = $pdo->prepare("SELECT * FROM extractions WHERE token = ?");
+$stmt = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_ts FROM extractions WHERE token = ?");
 $stmt->execute([$token]);
 $row = $stmt->fetch();
 if (!$row) fail('لینک یافت نشد.', 404);
 
 // نکته حریم‌خصوصی: هر لینک استخراج فقط ۵ دقیقه معتبره؛ بعدش حذف می‌شه و بروزرسانی امکان‌پذیر نیست
-$lastUpdate = strtotime((string)($row['created_at'] ?? '')) ?: 0;
+$lastUpdate = (int)($row['created_at_ts'] ?? 0);
 if (time() - $lastUpdate > 300) {
     $pdo->prepare("DELETE FROM extractions WHERE token = ?")->execute([$token]);
     fail('این لینک منقضی شده است. لطفاً دوباره از داخل ربات استخراج کنید.', 404);
