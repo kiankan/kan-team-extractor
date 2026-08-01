@@ -860,26 +860,66 @@ function formatBytes($bytes, $precision = 2) {
 function getPremiumTextEmojis() {
     global $pdo;
     $defaults = [
-        '🚀'=>'', '✅'=>'', '❌'=>'', '📊'=>'', '📦'=>'', '🔋'=>'', '⏳'=>'', '🟢'=>'', 
-        '🔴'=>'', '👤'=>'', '⚙️'=>'', '🔍'=>'', '🗂'=>'', '👨‍💼'=>'', '📢'=>'', '🔐'=>'', 
-        '👮‍♂️'=>'', '🌟'=>'', '⏱'=>'', '💾'=>'', '🔙'=>'', '🏠'=>'', '🆔'=>'', '📅'=>'', 
-        '🔗'=>'', '🌐'=>'', '🔲'=>'', '📄'=>'', '🔄'=>'', '📈'=>'', '📉'=>'', '🔹'=>'', 
-        '📝'=>'', '📌'=>'', '📡'=>'', '💬'=>'', '🎨'=>'', '✨'=>'', '👇'=>'', '🗑'=>'', 
-        '➕'=>'', '⛔️'=>'', '🚪'=>'', '⚠️'=>'', '🔸'=>'', '✔️'=>'', '🌍'=>'', '𔲲'=>'', 
-        '⌚️'=>'', '🏷'=>'', '👨‍💻'=>'', '📁'=>'', '⬅️'=>'', '➡️'=>'', '🛠'=>'', '💳'=>'', 
-        '🔊'=>'', '🔇'=>'',
-        '🇮🇷'=>'', '🇹🇷'=>'', '🇦🇪'=>'', '🇸🇦'=>'', '🇮🇶'=>'', '🇶🇦'=>'', '🇧🇭'=>'', '🇰🇼'=>'', '🇴🇲'=>'', '🇾🇪'=>'', '🇸🇾'=>'', '🇱🇧'=>'', '🇯🇴'=>'', '🇮🇱'=>'', '🇵🇸'=>'',
-        '🇩🇪'=>'', '🇬🇧'=>'', '🇳🇱'=>'', '🇫🇷'=>'', '🇫🇮'=>'', '🇷🇺'=>'', '🇵🇱'=>'', '🇨🇭'=>'', '🇸🇪'=>'', '🇮🇹'=>'', '🇪🇸'=>'', '🇺🇦'=>'', '🇩🇰'=>'', '🇦🇹'=>'', '🇧🇬'=>'', '🇷🇴'=>'', '🇳🇴'=>'', '🇧🇪'=>'', '🇮🇪'=>'', '🇵🇹'=>'', '🇬🇷'=>'', '🇨🇿'=>'', '🇭🇺'=>'', '🇷🇸'=>'', '🇭🇷'=>'', '🇸🇰'=>'', '🇸🇮'=>'', '🇪🇪'=>'', '🇱🇻'=>'', '🇱🇹'=>'', '🇮🇸'=>'', '🇦🇱'=>'', '🇲🇰'=>'', '🇧🇦'=>'', '🇲🇩'=>'', '🇧🇾'=>'', '🇨🇾'=>'', '🇱🇺'=>'',
-        '🇺🇸'=>'', '🇨🇦'=>'', '🇧🇷'=>'', '🇲🇽'=>'', '🇦🇷'=>'', '🇨🇱'=>'', '🇨🇴'=>'', '🇵🇪'=>'', '🇻🇪'=>'', '🇺🇾'=>'', '🇵🇦'=>'', '🇨🇺'=>'', '🇪🇨'=>'', '🇵🇾'=>'', '🇧🇴'=>'',
-        '🇸🇬'=>'', '🇮🇳'=>'', '🇦🇺'=>'', '🇯🇵'=>'', '🇰🇷'=>'', '🇭🇰'=>'', '🇹🇼'=>'', '🇻🇳'=>'', '🇿🇦'=>'', '🇨🇳'=>'', '🇲🇾'=>'', '🇮🇩'=>'', '🇹🇭'=>'', '🇵🇰'=>'', '🇦🇫'=>'', '🇳🇿'=>'',
-        '😀'=>'', '😃'=>'', '😄'=>'', '😁'=>'', '😆'=>'', '😅'=>'', '🤣'=>'', '😂'=>'', '🙂'=>'', '🙃'=>'',
-        '😉'=>'', '😊'=>'', '😇'=>'', '🥰'=>'', '😍'=>'', '🤩'=>'', '😘'=>'', '😗'=>'', '😚'=>'', '😙'=>'',
-        '😋'=>'', '😛'=>'', '😜'=>'', '🤪'=>'', '😝'=>'', '🤑'=>'', '🤗'=>'', '🤭'=>'', '🤫'=>'', '🤔'=>'',
-        '🤐'=>'', '🤨'=>'', '😐'=>'', '😑'=>'', '😶'=>'', '😏'=>'', '😒'=>'', '🙄'=>'', '😬'=>'', '🤥'=>'',
-        '😌'=>'', '😔'=>'', '😪'=>'', '🤤'=>'', '😴'=>'', '😷'=>'', '🤒'=>'', '🤕'=>'', '🤢'=>'', '🤮'=>'',
-        '🤧'=>'', '🥵'=>'', '🥶'=>'', '🥴'=>'', '😵'=>'', '🤯'=>'', '🤠'=>'', '🥳'=>'', '😎'=>'', '🤓'=>'',
-        '🧐'=>'', '😕'=>'', '😟'=>'', '🙁'=>'', '☹️'=>'', '😮'=>'', '😯'=>'', '😲'=>'', '😳'=>'', '🥺'=>'',
-        '😦'=>'', '😧'=>'', '😨'=>'', '😰'=>'', '😥'=>'', '😢'=>'', '😭'=>'', '😱'=>'', '😖'=>'', '😣'=>''
+        '🚀'=>'', '✅'=>'', '❌'=>'', '📊'=>'', '📦'=>'', '🔋'=>'', '⏳'=>'', '🟢'=>'',
+        '🔴'=>'', '👤'=>'', '⚙️'=>'', '🔍'=>'', '🗂'=>'', '👨‍💼'=>'', '📢'=>'', '🔐'=>'',
+        '👮‍♂️'=>'', '🌟'=>'', '⏱'=>'', '💾'=>'', '🔙'=>'', '🏠'=>'', '🆔'=>'', '📅'=>'',
+        '🔗'=>'', '🌐'=>'', '🔲'=>'', '📄'=>'', '🔄'=>'', '📈'=>'', '📉'=>'', '🔹'=>'',
+        '📝'=>'', '📌'=>'', '📡'=>'', '💬'=>'', '🎨'=>'', '✨'=>'', '👇'=>'', '🗑'=>'',
+        '➕'=>'', '⛔️'=>'', '🚪'=>'', '⚠️'=>'', '🔸'=>'', '✔️'=>'', '🌍'=>'', '⌚️'=>'',
+        '🏷'=>'', '👨‍💻'=>'', '📁'=>'', '⬅️'=>'', '➡️'=>'', '🛠'=>'', '💳'=>'', '🔊'=>'',
+        '🔇'=>'', '🇮🇷'=>'', '🇹🇷'=>'', '🇦🇪'=>'', '🇸🇦'=>'', '🇮🇶'=>'', '🇶🇦'=>'', '🇧🇭'=>'',
+        '🇰🇼'=>'', '🇴🇲'=>'', '🇾🇪'=>'', '🇸🇾'=>'', '🇱🇧'=>'', '🇯🇴'=>'', '🇮🇱'=>'', '🇵🇸'=>'',
+        '🇩🇪'=>'', '🇬🇧'=>'', '🇳🇱'=>'', '🇫🇷'=>'', '🇫🇮'=>'', '🇷🇺'=>'', '🇵🇱'=>'', '🇨🇭'=>'',
+        '🇸🇪'=>'', '🇮🇹'=>'', '🇪🇸'=>'', '🇺🇦'=>'', '🇩🇰'=>'', '🇦🇹'=>'', '🇧🇬'=>'', '🇷🇴'=>'',
+        '🇳🇴'=>'', '🇧🇪'=>'', '🇮🇪'=>'', '🇵🇹'=>'', '🇬🇷'=>'', '🇨🇿'=>'', '🇭🇺'=>'', '🇷🇸'=>'',
+        '🇭🇷'=>'', '🇸🇰'=>'', '🇸🇮'=>'', '🇪🇪'=>'', '🇱🇻'=>'', '🇱🇹'=>'', '🇮🇸'=>'', '🇦🇱'=>'',
+        '🇲🇰'=>'', '🇧🇦'=>'', '🇲🇩'=>'', '🇧🇾'=>'', '🇨🇾'=>'', '🇱🇺'=>'', '🇺🇸'=>'', '🇨🇦'=>'',
+        '🇧🇷'=>'', '🇲🇽'=>'', '🇦🇷'=>'', '🇨🇱'=>'', '🇨🇴'=>'', '🇵🇪'=>'', '🇻🇪'=>'', '🇺🇾'=>'',
+        '🇵🇦'=>'', '🇨🇺'=>'', '🇪🇨'=>'', '🇵🇾'=>'', '🇧🇴'=>'', '🇸🇬'=>'', '🇮🇳'=>'', '🇦🇺'=>'',
+        '🇯🇵'=>'', '🇰🇷'=>'', '🇭🇰'=>'', '🇹🇼'=>'', '🇻🇳'=>'', '🇿🇦'=>'', '🇨🇳'=>'', '🇲🇾'=>'',
+        '🇮🇩'=>'', '🇹🇭'=>'', '🇵🇰'=>'', '🇦🇫'=>'', '🇳🇿'=>'', '🔒'=>'', '🔓'=>'', '🛡️'=>'',
+        '🔑'=>'', '🗝️'=>'', '📶'=>'', '💻'=>'', '🖥️'=>'', '📱'=>'', '⌨️'=>'', '🖱️'=>'',
+        '💽'=>'', '💿'=>'', '🧮'=>'', '📞'=>'', '☎️'=>'', '✉️'=>'', '📧'=>'', '📨'=>'',
+        '📩'=>'', '📮'=>'', '🗳️'=>'', '📋'=>'', '📃'=>'', '📜'=>'', '📑'=>'', '🗒️'=>'',
+        '🗓️'=>'', '📇'=>'', '🗃️'=>'', '🗄️'=>'', '🧾'=>'', '💰'=>'', '💵'=>'', '💴'=>'',
+        '💶'=>'', '💷'=>'', '🪙'=>'', '💸'=>'', '🏦'=>'', '⚖️'=>'', '📐'=>'', '📏'=>'',
+        '✂️'=>'', '🔧'=>'', '🔨'=>'', '🪛'=>'', '🔩'=>'', '🧰'=>'', '🧲'=>'', '🔬'=>'',
+        '🔭'=>'', '🛰️'=>'', '🕹️'=>'', '🎯'=>'', '🧭'=>'', '⛓️'=>'', '🚦'=>'', '🚧'=>'',
+        '🛑'=>'', '🚫'=>'', '♻️'=>'', '🔃'=>'', '🔁'=>'', '🔂'=>'', '🔀'=>'', '⏸️'=>'',
+        '⏯️'=>'', '⏹️'=>'', '⏺️'=>'', '⏭️'=>'', '⏮️'=>'', '⏫'=>'', '⏬'=>'', '🔼'=>'',
+        '🔽'=>'', '▶️'=>'', '◀️'=>'', '🔺'=>'', '🔻'=>'', '👓'=>'', '🕶️'=>'', '🥽'=>'',
+        '🥼'=>'', '🦺'=>'', '👔'=>'', '👕'=>'', '👖'=>'', '🧣'=>'', '🧤'=>'', '🧥'=>'',
+        '🧦'=>'', '👗'=>'', '👘'=>'', '🥻'=>'', '🩱'=>'', '🩲'=>'', '🩳'=>'', '👙'=>'',
+        '👚'=>'', '👛'=>'', '👜'=>'', '👝'=>'', '🛍️'=>'', '🎒'=>'', '🩴'=>'', '👞'=>'',
+        '👟'=>'', '🥾'=>'', '🥿'=>'', '👠'=>'', '👡'=>'', '🩰'=>'', '👢'=>'', '👑'=>'',
+        '👒'=>'', '🎩'=>'', '🎓'=>'', '🧢'=>'', '🪖'=>'', '⛑️'=>'', '📿'=>'', '💄'=>'',
+        '💍'=>'', '💎'=>'', '📣'=>'', '📯'=>'', '🔔'=>'', '🔕'=>'', '🎼'=>'', '🎵'=>'',
+        '🎶'=>'', '🎙️'=>'', '🎚️'=>'', '🎛️'=>'', '🎤'=>'', '🎧'=>'', '📻'=>'', '📲'=>'',
+        '🖨️'=>'', '🖲️'=>'', '📀'=>'', '🎥'=>'', '🎞️'=>'', '📽️'=>'', '🎬'=>'', '📺'=>'',
+        '📷'=>'', '📸'=>'', '📹'=>'', '📼'=>'', '🔎'=>'', '🕯️'=>'', '💡'=>'', '🔦'=>'',
+        '🏮'=>'', '🪔'=>'', '📔'=>'', '📕'=>'', '📗'=>'', '📘'=>'', '📙'=>'', '📚'=>'',
+        '📖'=>'', '🔖'=>'', '🧷'=>'', '📎'=>'', '🖇️'=>'', '📍'=>'', '📆'=>'', '📂'=>'',
+        '🗞️'=>'', '📰'=>'', '📓'=>'', '📒'=>'', '🗑️'=>'', '💹'=>'', '📤'=>'', '📥'=>'',
+        '📫'=>'', '📪'=>'', '📬'=>'', '📭'=>'', '🧪'=>'', '🧫'=>'', '🧬'=>'', '⚒️'=>'',
+        '⛏️'=>'', '🪓'=>'', '🗜️'=>'', '🦯'=>'', '🪝'=>'', '🪜'=>'', '⚗️'=>'', '🩸'=>'',
+        '💊'=>'', '🩹'=>'', '🩺'=>'', '🩻'=>'', '🪞'=>'', '🪟'=>'', '🛏️'=>'', '🛋️'=>'',
+        '🪑'=>'', '🚽'=>'', '🪠'=>'', '🚿'=>'', '🛁'=>'', '🪤'=>'', '🪒'=>'', '🧴'=>'',
+        '🧹'=>'', '🧺'=>'', '🧻'=>'', '🪣'=>'', '🧼'=>'', '🫧'=>'', '🪥'=>'', '🧽'=>'',
+        '🧯'=>'', '🛒'=>'', '🇪🇬'=>'', '🇳🇬'=>'', '🇰🇪'=>'', '🇲🇦'=>'', '🇩🇿'=>'', '🇹🇳'=>'',
+        '🇱🇾'=>'', '🇪🇹'=>'', '🇬🇭'=>'', '🇸🇳'=>'', '🇨🇮'=>'', '🇨🇲'=>'', '🇺🇬'=>'', '🇹🇿'=>'',
+        '🇿🇲'=>'', '🇿🇼'=>'', '🇲🇿'=>'', '🇦🇴'=>'', '🇳🇦'=>'', '🇧🇼'=>'', '🇲🇬'=>'', '🇲🇱'=>'',
+        '🇳🇪'=>'', '🇧🇫'=>'', '🇧🇯'=>'', '🇹🇬'=>'', '🇬🇦'=>'', '🇨🇬'=>'', '🇨🇩'=>'', '🇷🇼'=>'',
+        '🇧🇮'=>'', '🇸🇴'=>'', '🇸🇩'=>'', '🇸🇸'=>'', '🇪🇷'=>'', '🇩🇯'=>'', '🇬🇲'=>'', '🇬🇳'=>'',
+        '🇬🇼'=>'', '🇸🇱'=>'', '🇱🇷'=>'', '🇲🇷'=>'', '🇹🇩'=>'', '🇨🇫'=>'', '🇬🇶'=>'', '🇸🇨'=>'',
+        '🇲🇺'=>'', '🇨🇻'=>'', '🇰🇲'=>'', '🇱🇸'=>'', '🇸🇿'=>'', '🇸🇹'=>'', '🇲🇨'=>'', '🇸🇲'=>'',
+        '🇻🇦'=>'', '🇦🇩'=>'', '🇱🇮'=>'', '🇲🇹'=>'', '🇲🇪'=>'', '🇽🇰'=>'', '🇬🇪'=>'', '🇦🇲'=>'',
+        '🇦🇿'=>'', '🇰🇿'=>'', '🇺🇿'=>'', '🇹🇲'=>'', '🇹🇯'=>'', '🇰🇬'=>'', '🇱🇰'=>'', '🇧🇩'=>'',
+        '🇳🇵'=>'', '🇲🇲'=>'', '🇰🇭'=>'', '🇱🇦'=>'', '🇵🇭'=>'', '🇲🇳'=>'', '🇰🇵'=>'', '🇧🇳'=>'',
+        '🇲🇻'=>'', '🇧🇹'=>'', '🇹🇱'=>'', '🇵🇬'=>'', '🇫🇯'=>'', '🇼🇸'=>'', '🇹🇴'=>'', '🇻🇺'=>'',
+        '🇸🇧'=>'', '🇰🇮'=>'', '🇵🇼'=>'', '🇫🇲'=>'', '🇲🇭'=>'', '🇳🇷'=>'', '🇹🇻'=>'', '🇨🇷'=>'',
+        '🇬🇹'=>'', '🇭🇳'=>'', '🇸🇻'=>'', '🇳🇮'=>'', '🇩🇴'=>'', '🇭🇹'=>'', '🇯🇲'=>'', '🇹🇹'=>'',
+        '🇧🇸'=>'', '🇧🇿'=>'', '🇬🇾'=>'', '🇸🇷'=>'', '🏁'=>'', '🚩'=>'', '🎌'=>'', '🏴'=>'',
+        '🏳️'=>'', '🏳️‍🌈'=>'', '🏳️‍⚧️'=>'', '🏴‍☠️'=>''
     ];
     if (!$pdo) return $defaults;
     $saved = json_decode(getSetting($pdo, 'premium_text_emojis', '{}'), true);
@@ -948,6 +988,83 @@ function answerCallback($callbackId, $text = '', $showAlert = false) {
     curl_exec($ch);
     curl_close($ch);
     $isAnswered = true;
+}
+
+// نودهای check-host.net داخل ایران که برای فیچر «تست سرورها» استفاده می‌شن (شهرهای مختلف)
+const CHECK_HOST_IRAN_NODES = [
+    'ir5.node.check-host.net', // تهران
+    'ir2.node.check-host.net', // اصفهان
+    'ir6.node.check-host.net', // قم
+];
+
+function checkHostNodeLabel(string $node): string {
+    $map = [
+        'ir5.node.check-host.net' => '📍 تهران',
+        'ir2.node.check-host.net' => '📍 اصفهان',
+        'ir6.node.check-host.net' => '📍 قم',
+        'ir3.node.check-host.net' => '📍 شیراز',
+        'ir4.node.check-host.net' => '📍 شیراز',
+        'ir8.node.check-host.net' => '📍 تهران',
+    ];
+    return $map[$node] ?? $node;
+}
+
+/**
+ * تست اتصال TCP از طریق API عمومی check-host.net، از روی نودهایی که پاس داده می‌شن.
+ * چون check-host ناهمزمانه (اول درخواست ثبت می‌شه، بعد نتیجه‌ش آماده می‌شه)، این تابع
+ * تا رسیدن نتیجه‌ی همه‌ی نودها (یا رسیدن به maxWaitSeconds) صبر می‌کنه.
+ * خروجی: ['ok'=>bool, 'results'=>[node => نتیجه‌ی خام check-result]]
+ */
+function checkHostTcpTest(string $host, int $port, array $nodes, int $maxWaitSeconds = 9): array {
+    // اگه هاست IPv6 خامه (چند تا ':' توش داره)، باید داخل [] بذاریمش وگرنه
+    // ':port' آخرش قاطی خود آدرس می‌شه و check-host.net نمی‌تونه درست پارسش کنه
+    $hostPart = (strpos($host, ':') !== false && strpos($host, '[') === false) ? "[{$host}]" : $host;
+    $target = $hostPart . ':' . $port;
+    $url = 'https://check-host.net/check-tcp?host=' . urlencode($target);
+    foreach ($nodes as $n) $url .= '&node=' . urlencode($n);
+
+    $submit = checkHostHttpGet($url);
+    $submitData = json_decode((string)$submit, true);
+    if (!is_array($submitData) || empty($submitData['ok']) || empty($submitData['request_id'])) {
+        return ['ok' => false, 'results' => []];
+    }
+
+    $resultUrl = 'https://check-host.net/check-result/' . urlencode((string)$submitData['request_id']);
+    $results = [];
+    $elapsedSeconds = 0;
+    $intervalSeconds = 2; // usleep() برای بیش از ۱ ثانیه رسماً روی همه‌ی سیستم‌عامل‌ها پشتیبانی نمی‌شه، پس عدد صحیح + sleep()
+
+    while ($elapsedSeconds < $maxWaitSeconds) {
+        sleep($intervalSeconds);
+        $elapsedSeconds += $intervalSeconds;
+
+        $raw = checkHostHttpGet($resultUrl);
+        $parsed = json_decode((string)$raw, true);
+        if (!is_array($parsed)) continue;
+
+        $results = $parsed;
+        $allDone = true;
+        foreach ($nodes as $n) {
+            if (empty($parsed[$n])) { $allDone = false; break; }
+        }
+        if ($allDone) break;
+    }
+
+    return ['ok' => true, 'results' => $results];
+}
+
+function checkHostHttpGet(string $url) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Accept: application/json'],
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $resp = curl_exec($ch);
+    curl_close($ch);
+    return $resp;
 }
 
 // آپدیت شده برای ارسال به گروه دوم (پشتیبان)
@@ -1165,7 +1282,8 @@ function getBtnRegistry(): array {
         // دلیل در ادیتور چیدمان/ردیف‌های «سطح استخراج» قابل جابه‌جایی نیست؛
         // ولی متن، رنگ و ایموجی‌اش از تب‌های «برچسب‌ها/رنگ‌ها/ایموجی‌ها» در پنل
         // وب کاملاً قابل تغییره.
-        'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'callback' => null,                    'style' => 'success', 'menu' => 'sub_menu', 'fixed_row' => true],
+        'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'callback' => null,                    'style' => 'success', 'menu' => 'sub_menu'],
+        'btn_test_servers' => ['label' => '🧪 تست سرورها',    'callback' => 'test_servers_menu',     'style' => 'primary', 'menu' => 'sub_menu'],
     ];
 }
 
@@ -1183,7 +1301,8 @@ function getDefaultMenuLayouts(): array {
         'sub_menu' => [
             ['btn_sub_update'],
             ['btn_sub_text', 'btn_sub_ip'],
-            ['btn_sub_qr1', 'btn_sub_qr2']
+            ['btn_sub_qr1', 'btn_sub_qr2'],
+            ['btn_web_view', 'btn_test_servers']
         ]
     ];
 }
@@ -1211,7 +1330,7 @@ function getBackupSubOnlyKeys(): array {
 }
 
 // می‌سازد کیبورد شیشه‌ای یک منو را، بر اساس چیدمان و متن‌های ذخیره‌شده از پنل وب (webpanel.php)
-function buildMenuKeyboard($pdo, string $menuKey, bool $isAdmin = false, bool $isSupAdmin = false): array {
+function buildMenuKeyboard($pdo, string $menuKey, bool $isAdmin = false, bool $isSupAdmin = false, ?string $webViewUrl = null): array {
     $registry = getBtnRegistry();
     $labels   = getCustomBtnLabels($pdo);
     $layout   = getMenuLayout($pdo, $menuKey);
@@ -1240,6 +1359,16 @@ function buildMenuKeyboard($pdo, string $menuKey, bool $isAdmin = false, bool $i
                 $label .= ': ' . $publicStatus;
             }
 
+            // آدرس این دکمه هر بار برای هر استخراج فرق می‌کند، پس callback ثابت نداره؛
+            // اگر لینک این استخراج در دسترس نباشد (مثلاً منویی خارج از زمینه‌ی یک
+            // استخراج مشخص) این دکمه اصلاً رندر نمی‌شود، ولی چیدمانش مثل بقیه‌ی
+            // دکمه‌ها از پنل وب قابل جابه‌جاییه.
+            if ($btnKey === 'btn_web_view') {
+                if ($webViewUrl === null) continue;
+                $kbRow[] = createUrlBtn($label, $webViewUrl, $def['style'] ?? null, $btnKey);
+                continue;
+            }
+
             $kbRow[] = createBtn($label, $def['callback'], $def['style'] ?? null, $btnKey);
         }
         if (!empty($kbRow)) $keyboard[] = $kbRow;
@@ -1255,8 +1384,8 @@ function getAdminInlineMarkup($pdo, bool $isAdmin = true, bool $isSupAdmin = fal
     return buildMenuKeyboard($pdo, 'admin_menu', $isAdmin, $isSupAdmin);
 }
 
-function getSubInlineMarkup($pdo): array {
-    return buildMenuKeyboard($pdo, 'sub_menu', false, false);
+function getSubInlineMarkup($pdo, ?string $webViewUrl = null): array {
+    return buildMenuKeyboard($pdo, 'sub_menu', false, false, $webViewUrl);
 }
 
 function sendUserManagePanel($chatId, $targetId, $pdo, $messageId = null) {
@@ -1691,9 +1820,7 @@ try {
                     saveExtraction($pdo, $viewToken, $chatId, $text, $subData, $headerInfo);
                     $viewUrl = getWebRootUrl() . "/sub_view.php?id=" . $viewToken;
 
-                    $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false);
-                    $webViewLabel = getCustomBtnLabels($pdo)['btn_web_view'] ?? '🖥 مشاهده در وب';
-                    $kb['inline_keyboard'][] = [createUrlBtn($webViewLabel, $viewUrl, 'success', 'btn_web_view')];
+                    $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false, $viewUrl);
                     $statePayload = json_encode(['sub_url' => $text, 'time' => time(), 'view_token' => $viewToken]);
                     $pdo->prepare("INSERT INTO user_states (user_id, state, data) VALUES (?, 'HAS_SUB_DATA', ?) ON DUPLICATE KEY UPDATE state='HAS_SUB_DATA', data=?")->execute([$chatId, $statePayload, $statePayload]);
                     sendMessage($chatId, $resText, $kb);
@@ -2327,7 +2454,61 @@ try {
             exit;
         }
 
-        if (in_array($data, ['get_extracted_configs', 'get_extracted_ips', 'update_sub_data', 'get_qr_code', 'get_configs_qr'])) {
+        if (preg_match('/^test_srv_(\d+)$/', $data, $tsm)) {
+            $idx = (int)$tsm[1];
+            $stmt = $pdo->prepare("SELECT data FROM user_states WHERE user_id = ? AND state = 'HAS_SUB_DATA'");
+            $stmt->execute([$chatId]);
+            $state = $stmt->fetch();
+            if (!$state) { answerCallback($callbackId, '❌ سشن منقضی شده، دوباره لینک ساب رو بفرست.', true); exit; }
+
+            $stateData = json_decode($state['data'], true);
+            if (time() - ($stateData['time'] ?? 0) > 300) {
+                answerCallback($callbackId, '❌ زمان ۵ دقیقه‌ای این پنل تمام شده است.', true);
+                exit;
+            }
+
+            $servers = $stateData['test_servers'] ?? [];
+            if (!isset($servers[$idx])) {
+                answerCallback($callbackId, '❌ این سرور دیگه در دسترس نیست؛ لیست تست سرورها رو دوباره باز کن.', true);
+                exit;
+            }
+
+            $srv  = $servers[$idx];
+            $port = (int)($srv['port'] ?: 443);
+            $safeName = mb_strimwidth((string)$srv['name'], 0, 60, '…');
+            $backKb = ['inline_keyboard' => [[createBtn('🔙 بازگشت به لیست سرورها', 'test_servers_menu', 'danger', 'btn_back')]]];
+
+            answerCallback($callbackId, '', false);
+            editMessageText($chatId, $messageId, "⏳ <b>لطفاً منتظر بمانید...</b>\n\nدر حال تست اتصال به:\n{$safeName}\n<code>{$srv['host']}:{$port}</code>\n\nتست از چند نود داخل ایران انجام می‌شه، ممکنه چند ثانیه طول بکشه.");
+
+            $chRes = checkHostTcpTest($srv['host'], $port, CHECK_HOST_IRAN_NODES);
+
+            if (!$chRes['ok']) {
+                editMessageText($chatId, $messageId, "❌ ارتباط با سرویس تست (check-host.net) برقرار نشد؛ دوباره امتحان کن.", $backKb);
+                exit;
+            }
+
+            $lines = [];
+            foreach (CHECK_HOST_IRAN_NODES as $n) {
+                $label      = checkHostNodeLabel($n);
+                $nodeResult = $chRes['results'][$n] ?? null;
+                if (!is_array($nodeResult) || !isset($nodeResult[0])) {
+                    $lines[] = "{$label}: ⏳ بدون پاسخ (تایم‌اوت نود)";
+                } elseif (isset($nodeResult[0]['time'])) {
+                    $ms = (int)round($nodeResult[0]['time'] * 1000);
+                    $lines[] = "{$label}: ✅ وصل شد ({$ms}ms)";
+                } else {
+                    $errMsg = $nodeResult[0]['error'] ?? 'اتصال برقرار نشد';
+                    $lines[] = "{$label}: ❌ {$errMsg}";
+                }
+            }
+
+            $resultText = "🧪 <b>نتیجه‌ی تست سرور</b>\n<b>{$safeName}</b>\n<code>{$srv['host']}:{$port}</code>\n\n" . implode("\n", $lines);
+            editMessageText($chatId, $messageId, $resultText, $backKb);
+            exit;
+        }
+
+        if (in_array($data, ['get_extracted_configs', 'get_extracted_ips', 'update_sub_data', 'get_qr_code', 'get_configs_qr', 'test_servers_menu'])) {
             $stmt = $pdo->prepare("SELECT data FROM user_states WHERE user_id = ? AND state = 'HAS_SUB_DATA'");
             $stmt->execute([$chatId]);
             $state = $stmt->fetch();
@@ -2379,9 +2560,7 @@ try {
                             $newStatePayload = json_encode(['sub_url' => $subUrl, 'time' => time(), 'view_token' => $viewToken]);
                             $pdo->prepare("UPDATE user_states SET data = ? WHERE user_id = ? AND state = 'HAS_SUB_DATA'")->execute([$newStatePayload, $chatId]);
 
-                            $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false);
-                            $webViewLabel = getCustomBtnLabels($pdo)['btn_web_view'] ?? '🖥 مشاهده در وب';
-                            $kb['inline_keyboard'][] = [createUrlBtn($webViewLabel, $viewUrl, 'success', 'btn_web_view')];
+                            $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false, $viewUrl);
                             editMessageText($chatId, $messageId, $resText, $kb);
                         } else {
                             if (is_array($subData) && ($subData['error'] ?? '') === 'html_page') {
@@ -2389,6 +2568,52 @@ try {
                             } else {
                                 editMessageText($chatId, $messageId, "❌ خطا در بروزرسانی.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]]);
                             }
+                        }
+                        exit;
+                    }
+
+                    if ($data === 'test_servers_menu') {
+                        editMessageText($chatId, $messageId, "⏳ در حال دریافت لیست سرورها...");
+                        $subData = class_exists('AdvancedSubExtractor') ? (new AdvancedSubExtractor())->extractSubscription($subUrl) : null;
+
+                        if (is_array($subData) && !empty($subData['configs_list'])) {
+                            $extractor = new AdvancedSubExtractor();
+                            $servers = [];
+                            $seen = [];
+                            $truncated = false;
+                            foreach ($subData['configs_list'] as $c) {
+                                if (count($servers) >= 60) { $truncated = true; break; } // محدودیت عملی کیبورد اینلاین تلگرام
+                                $hp = $extractor->extractHostPort($c['raw']);
+                                if ($hp['host'] === '') continue;
+                                $key = $hp['host'] . ':' . $hp['port'];
+                                if (isset($seen[$key])) continue; // چند کانفیگ ممکنه روی یه سرور باشن، فقط یه بار نشونش بده
+                                $seen[$key] = true;
+                                $servers[] = ['name' => $c['name'], 'host' => $hp['host'], 'port' => $hp['port']];
+                            }
+
+                            if (empty($servers)) {
+                                editMessageText($chatId, $messageId, "❌ هیچ سرور قابل‌تستی توی این ساب پیدا نشد.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'update_sub_data', 'danger', 'btn_back')]]]);
+                                exit;
+                            }
+
+                            // چون callback_data تلگرام محدوده، لیست سرورها رو با ایندکس روی همون
+                            // وضعیت HAS_SUB_DATA کاربر ذخیره می‌کنیم تا با زدن روی هرکدوم پیدا بشه.
+                            $newStatePayload = json_encode(['sub_url' => $subUrl, 'time' => time(), 'view_token' => $stateData['view_token'] ?? '', 'test_servers' => $servers]);
+                            $pdo->prepare("UPDATE user_states SET data = ? WHERE user_id = ? AND state = 'HAS_SUB_DATA'")->execute([$newStatePayload, $chatId]);
+
+                            $kb = ['inline_keyboard' => []];
+                            $row = [];
+                            foreach ($servers as $i => $s) {
+                                $label = mb_strimwidth($s['name'] . ' — ' . $s['host'], 0, 40, '…');
+                                $row[] = createBtn($label, "test_srv_{$i}", 'primary', 'btn_test_server_item');
+                                if (count($row) == 2) { $kb['inline_keyboard'][] = $row; $row = []; }
+                            }
+                            if (!empty($row)) $kb['inline_keyboard'][] = $row;
+                            $kb['inline_keyboard'][] = [createBtn('🔙 بازگشت', 'update_sub_data', 'danger', 'btn_back')];
+
+                            editMessageText($chatId, $messageId, "🧪 <b>تست سرورها</b>\n\nروی هرکدوم بزن تا اتصالش تست بشه (" . count($servers) . " سرور" . ($truncated ? '، فقط ۶۰ تای اول' : '') . "):", $kb);
+                        } else {
+                            editMessageText($chatId, $messageId, "❌ خطا در دریافت لیست سرورها.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'update_sub_data', 'danger', 'btn_back')]]]);
                         }
                         exit;
                     }
@@ -2486,7 +2711,7 @@ try {
                     if ($data === 'get_qr_code') {
                         $qrUrl    = "https://quickchart.io/qr?text=" . urlencode($subUrl) . "&size=500&margin=2&dark=000000&light=ffffff";
                         $ch       = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendPhoto");
-                        $caption  = applyPremiumToText("𔲲 <b>کیو‌آر کد ساب‌اسکریپشن شما</b>\n\nلینک: <code>{$subUrl}</code>"); 
+                        $caption  = applyPremiumToText("🔳 <b>کیو‌آر کد ساب‌اسکریپشن شما</b>\n\nلینک: <code>{$subUrl}</code>"); 
                         $postData = ['chat_id' => $chatId, 'photo' => $qrUrl, 'caption' => $caption, 'parse_mode' => 'HTML', 'reply_markup' => json_encode(['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]])];
                         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 15]);
                         curl_exec($ch); curl_close($ch);
