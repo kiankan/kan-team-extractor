@@ -130,6 +130,67 @@ class AdvancedSubExtractor
         return strtoupper($protocol) . ' Config';
     }
 
+    /**
+     * هاست و پورت واقعی سرور رو از متن خام کانفیگ در میاره (برای فیچر «تست سرورها»).
+     * منطقش دقیقاً هم‌راستا با extractHostPort() جاوااسکریپتی توی sub_view.php هست.
+     * خروجی: ['host'=>string, 'port'=>string] — اگه چیزی پیدا نشه هر دو خالی برمی‌گردن.
+     */
+    public function extractHostPort(string $raw): array
+    {
+        $empty = ['host' => '', 'port' => ''];
+        if ($raw === '') return $empty;
+
+        if (!preg_match('#^([a-z0-9]+)://#i', $raw, $sm)) return $empty;
+        $scheme = strtolower($sm[1]);
+
+        try {
+            // vmess:// base64(json) با فیلدهای add و port
+            if ($scheme === 'vmess') {
+                $body = explode('#', substr($raw, 8))[0];
+                $body = explode('?', $body)[0];
+                $json = json_decode($this->decodeBase64Safe($body), true);
+                if (is_array($json)) {
+                    return ['host' => (string)($json['add'] ?? ''), 'port' => (string)($json['port'] ?? '')];
+                }
+                return $empty;
+            }
+
+            // ssr:// base64(host:port:protocol:method:obfs:base64pass/?params)
+            if ($scheme === 'ssr') {
+                $body = explode('#', substr($raw, 6))[0];
+                $decoded = $this->decodeBase64Safe($body);
+                if (preg_match('/^([^:]+):(\d+):/', $decoded, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                return $empty;
+            }
+
+            // ss:// دو شکل شناخته‌شده: ss://method:pass@host:port یا ss://BASE64(...)
+            if ($scheme === 'ss') {
+                $rest = explode('#', substr($raw, 5))[0];
+                if (preg_match('/@([^:\/?#]+):(\d+)/', $rest, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                $decoded = $this->decodeBase64Safe(explode('?', $rest)[0]);
+                if (preg_match('/@([^:\/?#]+):(\d+)/', $decoded, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                return $empty;
+            }
+
+            // فرم عمومی برای vless, trojan, hysteria, hysteria2/hy2, tuic, socks, http(s)
+            // scheme://[userinfo@]host[:port][/path][?query][#fragment]
+            if (preg_match('#^[a-z0-9]+://(?:[^@/?#]*@)?(\[[^\]]+\]|[^:/?#]+)(?::(\d+))?#i', $raw, $m)) {
+                $host = trim($m[1], '[]'); // پرانتز IPv6 رو حذف کن
+                return ['host' => $host, 'port' => $m[2] ?? ''];
+            }
+        } catch (\Throwable $e) {
+            return $empty;
+        }
+
+        return $empty;
+    }
+
     private function decodeBase64Safe(string $str): string
     {
         $str = str_replace(['-', '_'], ['+', '/'], $str);
