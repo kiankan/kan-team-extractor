@@ -180,7 +180,7 @@ class AdvancedSubExtractor
 
             // فرم عمومی برای vless, trojan, hysteria, hysteria2/hy2, tuic, socks, http(s)
             // scheme://[userinfo@]host[:port][/path][?query][#fragment]
-            if (preg_match('#^[a-z0-9]+://(?:[^@/?#]*@)?(\[[^\]]+\]|[^:/?#]+)(?::(\d+))?#i', $raw, $m)) {
+            if (preg_match('~^[a-z0-9]+://(?:[^@/?#]*@)?(\[[^\]]+\]|[^:/?#]+)(?::(\d+))?~i', $raw, $m)) {
                 $host = trim($m[1], '[]'); // پرانتز IPv6 رو حذف کن
                 return ['host' => $host, 'port' => $m[2] ?? ''];
             }
