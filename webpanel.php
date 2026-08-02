@@ -739,6 +739,13 @@ if (isset($_GET['api'])) {
         setSetting($pdo, 'show_account_btn', $cur === 'on' ? 'off' : 'on');
         echo json_encode(['ok' => true, 'status' => getSetting($pdo, 'show_account_btn', 'on')]); exit;
     }
+    if ($api === 'set_sub_theme') {
+        $allowedThemes = ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'];
+        $theme = (string)($body['theme'] ?? 'default');
+        if (!in_array($theme, $allowedThemes, true)) { echo json_encode(['ok' => false]); exit; }
+        setSetting($pdo, 'sub_view_theme', $theme);
+        echo json_encode(['ok' => true, 'theme' => $theme]); exit;
+    }
 
     // ================= مدیران =================
     if ($api === 'add_admin') {
@@ -1013,6 +1020,26 @@ $layoutMain  = is_array($savedMain)  && !empty($savedMain)  ? $savedMain  : $def
 $layoutAdmin = is_array($savedAdmin) && !empty($savedAdmin) ? $savedAdmin : $defaults['admin_menu'];
 $layoutSub   = is_array($savedSub)   && !empty($savedSub)   ? $savedSub   : $defaults['sub_menu'];
 
+// اگه دکمه‌ی جدیدی به رجیستری اضافه شده باشه (مثل «تست سرورها») که توی چیدمان
+// ذخیره‌شده‌ی قبلی نیست، خودکار به‌عنوان یه ردیف جدید ته چیدمان اضافه می‌شه —
+// دقیقاً هم‌راستا با همین منطق توی bot.php (getMenuLayout)، تا این تب همیشه
+// دقیقاً همون چیزی رو نشون بده که واقعاً توی تلگرام رندر می‌شه.
+function autoAppendNewButtons(array $layout, array $registry, string $menuKey): array {
+    $used = [];
+    foreach ($layout as $row) {
+        if (is_array($row)) foreach ($row as $k) $used[$k] = true;
+    }
+    foreach ($registry as $key => $def) {
+        if (($def['menu'] ?? '') === $menuKey && empty($used[$key])) {
+            $layout[] = [$key];
+        }
+    }
+    return $layout;
+}
+$layoutMain  = autoAppendNewButtons($layoutMain,  $registry, 'main_menu');
+$layoutAdmin = autoAppendNewButtons($layoutAdmin, $registry, 'admin_menu');
+$layoutSub   = autoAppendNewButtons($layoutSub,   $registry, 'sub_menu');
+
 // فیلتر امنیتی هماهنگ با bot.php (buildMenuKeyboard): حتی اگر یک چیدمان قدیمی/دستکاری‌شده
 // این سه کلید را مستقیم در سطح اول «پنل مدیریت» ذخیره کرده باشد، اینجا هم حذف می‌شوند تا
 // ویرایشگر پنل وب دقیقاً همان چیزی را نشان دهد که در تلگرام واقعاً رندر می‌شود.
@@ -1061,6 +1088,7 @@ $hasCustomPassword = getSetting($pdo, 'webpanel_password_hash', '') !== '';
 
 $showAccountBtn = getSetting($pdo, 'show_account_btn', 'on') === 'on';
 $publicModeOn   = getSetting($pdo, 'public_mode', '0') === '1';
+$currentSubTheme = getSetting($pdo, 'sub_view_theme', 'default');
 
 $fjStatus       = getSetting($pdo, 'fj_status', 'off');
 $fjChannel      = getSetting($pdo, 'fj_channel', '');
@@ -1071,7 +1099,7 @@ $cronInterval   = getSetting($pdo, 'cron_interval', '300');
 $supAdminId     = defined('ADMIN_ID') ? (string)ADMIN_ID : null;
 
 // تب اولیه‌ای که باید باز شود (برای لینک‌های عمیق از داخل ربات، مثلاً webpanel.php?tab=fj)
-$ALLOWED_TABS = ['dashboard','main_menu','admin_menu','sub_menu','labels','colors','button_emojis','text_emojis','fj','reports','cron','admins','users','general','broadcast','backup','security'];
+$ALLOWED_TABS = ['dashboard','main_menu','admin_menu','sub_menu','labels','colors','button_emojis','text_emojis','sub_theme','fj','reports','cron','admins','users','general','broadcast','backup','security'];
 $initialTab = (string)($_GET['tab'] ?? 'dashboard');
 if (!in_array($initialTab, $ALLOWED_TABS, true)) $initialTab = 'dashboard';
 ?>
@@ -1279,6 +1307,13 @@ button.act:active { transform: scale(.96); }
 
 .color-opt-wrap { display:flex; gap:6px; flex-wrap:wrap; }
 .color-opt { padding:8px 14px !important; font-size:11.5px !important; opacity:.4; transition:.2s var(--ease); }
+.theme-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:14px; margin-top:14px; }
+.theme-card { border:2px solid var(--glass-border); border-radius:16px; padding:14px; cursor:pointer; transition:.2s var(--ease); text-align:center; }
+.theme-card:hover { transform:translateY(-3px); }
+.theme-card.active { box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 24px rgba(0,0,0,.35); }
+.theme-swatch { width:100%; height:52px; border-radius:11px; margin-bottom:10px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+.theme-title { font-size:13px; font-weight:700; color:#fff; }
+.theme-check { font-size:11.5px; color:var(--green); margin-top:6px; min-height:16px; font-weight:700; }
 .color-opt.active-opt { opacity:1; box-shadow:0 0 0 2px rgba(255,255,255,.55), 0 8px 20px rgba(0,0,0,.35) !important; }
 
 .settings-box { padding:26px; max-width:460px; }
@@ -1352,6 +1387,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
     <button class="tab-btn" data-tab="colors">🎨 رنگ دکمه‌ها</button>
     <button class="tab-btn" data-tab="button_emojis">✨ ایموجی دکمه‌ها</button>
     <button class="tab-btn" data-tab="text_emojis">📝 ایموجی متن‌ها</button>
+    <button class="tab-btn" data-tab="sub_theme">🎨 تم ساب</button>
     <button class="tab-btn" data-tab="fj">🔐 قفل کانال</button>
     <button class="tab-btn" data-tab="reports">📢 گزارشات</button>
     <button class="tab-btn" data-tab="cron">⏱ کرون</button>
@@ -1545,6 +1581,34 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <button class="act btn-success" onclick="saveTextEmojis()">💾 ذخیره همه آیدی‌ها</button>
     </div>
     <div class="hint">هر ایموجی که در این لیست آیدی داشته باشد، در تمام متن‌های ارسالی ربات (پیام‌ها، کپشن‌ها و ...) به‌صورت خودکار با نسخه‌ی متحرک آن جایگزین می‌شود. خالی گذاشتن فیلد و ذخیره، آن ایموجی را به حالت عادی برمی‌گرداند.</div>
+</div>
+
+<!-- ================= تم ساب ================= -->
+<div class="menu-section" id="section-sub_theme">
+    <div class="glass box">
+        <h3>🎨 تم رنگی صفحه‌ی «مشاهده در وب»</h3>
+        <div class="hint" style="margin-top:0;">این تم فقط روی صفحه‌ای که کاربر با زدن دکمه‌ی «مشاهده در وب» می‌بینه اعمال می‌شه (sub_view.php). با انتخاب هرکدوم، بلافاصله برای همه‌ی کاربرا فعال می‌شه.</div>
+        <div class="theme-grid" id="theme-grid">
+            <?php
+            $themeList = [
+                'default' => ['نئون بنفش',   '#a855f7', '#d946ef', '#050107'],
+                'ocean'   => ['اقیانوسی',     '#0ea5e9', '#06b6d4', '#020617'],
+                'emerald' => ['زمرد',         '#059669', '#10b981', '#020e0a'],
+                'ember'   => ['آتشین',        '#f59e0b', '#f97316', '#0d0602'],
+                'gold'    => ['طلایی لاکچری', '#d4af37', '#f5c542', '#060503'],
+                'crimson' => ['یاقوتی',       '#e11d48', '#f43f5e', '#0c0206'],
+            ];
+            foreach ($themeList as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubTheme === $key);
+            ?>
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-<?= $key ?>" onclick="setSubTheme('<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
+                <div class="theme-title"><?= $title ?></div>
+                <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
 </div>
 
 <!-- ================= قفل کانال ================= -->
@@ -2601,6 +2665,21 @@ async function toggleAccountBtn() {
         applyRoleDim();
         renderPreview(ACTIVE_MENU);
         showToast('✅ ذخیره شد.', 'success');
+    }
+}
+
+// ---------------- تم ساب ----------------
+async function setSubTheme(theme) {
+    const data = await apiPost('set_sub_theme', { theme });
+    if (data.ok) {
+        document.querySelectorAll('.theme-card').forEach(card => {
+            const active = card.id === 'theme-card-' + theme;
+            card.classList.toggle('active', active);
+            card.querySelector('.theme-check').textContent = active ? '✅ فعال' : '';
+        });
+        showToast('🎨 تم صفحه‌ی «مشاهده در وب» عوض شد.', 'success');
+    } else {
+        showToast('❌ خطا در ذخیره‌ی تم.', 'error');
     }
 }
 
