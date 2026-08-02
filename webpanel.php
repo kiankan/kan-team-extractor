@@ -26,37 +26,44 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false
     ]);
+    // مثل bot.php، این چک/ساخت جدول‌ها هم فقط باید یه‌بار اجرا بشه نه هر بار که ادمین
+    // پنل رو باز می‌کنه. فلگش توی جدول settings نگه داشته می‌شه (نه فایل روی دیسک)؛
+    // کلیدش با bot.php فرق داره چون یه جدول اضافه (panel_login_throttle) هم اینجا ساخته می‌شه.
     $pdo->exec("CREATE TABLE IF NOT EXISTS `settings` (`setting_key` VARCHAR(50) PRIMARY KEY, `setting_value` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `users` (`user_id` BIGINT PRIMARY KEY, `points` INT DEFAULT 0, `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, `is_blocked` TINYINT(1) DEFAULT 0, `is_admin` TINYINT(1) DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `admins` (`admin_id` BIGINT PRIMARY KEY, `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `user_states` (`user_id` BIGINT PRIMARY KEY, `state` VARCHAR(50) NOT NULL, `data` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `extractions` (
-        `token` VARCHAR(32) PRIMARY KEY,
-        `user_id` BIGINT,
-        `sub_url` TEXT,
-        `total_configs` INT DEFAULT 0,
-        `total_bytes` DOUBLE DEFAULT 0,
-        `used_bytes` DOUBLE DEFAULT 0,
-        `expire_ts` BIGINT DEFAULT 0,
-        `configs_json` LONGTEXT,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `backup_imports` (
-        `id` INT AUTO_INCREMENT PRIMARY KEY,
-        `user_id` BIGINT,
-        `inserted_count` INT DEFAULT 0,
-        `skipped_count` INT DEFAULT 0,
-        `failed_count` INT DEFAULT 0,
-        `total_count` INT DEFAULT 0,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    // محدودیت تلاش ورود به پنل (ضد حدس رمز/بروت‌فورس) بر اساس IP
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `panel_login_throttle` (
-        `ip` VARCHAR(45) PRIMARY KEY,
-        `attempts` INT DEFAULT 0,
-        `first_attempt_at` INT DEFAULT 0,
-        `locked_until` INT DEFAULT 0
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    $schemaChecked = $pdo->query("SELECT 1 FROM `settings` WHERE setting_key = 'schema_checked_panel'")->fetchColumn();
+    if (!$schemaChecked) {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `users` (`user_id` BIGINT PRIMARY KEY, `points` INT DEFAULT 0, `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, `is_blocked` TINYINT(1) DEFAULT 0, `is_admin` TINYINT(1) DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `admins` (`admin_id` BIGINT PRIMARY KEY, `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `user_states` (`user_id` BIGINT PRIMARY KEY, `state` VARCHAR(50) NOT NULL, `data` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `extractions` (
+            `token` VARCHAR(32) PRIMARY KEY,
+            `user_id` BIGINT,
+            `sub_url` TEXT,
+            `total_configs` INT DEFAULT 0,
+            `total_bytes` DOUBLE DEFAULT 0,
+            `used_bytes` DOUBLE DEFAULT 0,
+            `expire_ts` BIGINT DEFAULT 0,
+            `configs_json` LONGTEXT,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `backup_imports` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `user_id` BIGINT,
+            `inserted_count` INT DEFAULT 0,
+            `skipped_count` INT DEFAULT 0,
+            `failed_count` INT DEFAULT 0,
+            `total_count` INT DEFAULT 0,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        // محدودیت تلاش ورود به پنل (ضد حدس رمز/بروت‌فورس) بر اساس IP
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `panel_login_throttle` (
+            `ip` VARCHAR(45) PRIMARY KEY,
+            `attempts` INT DEFAULT 0,
+            `first_attempt_at` INT DEFAULT 0,
+            `locked_until` INT DEFAULT 0
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->prepare("INSERT INTO `settings` (setting_key, setting_value) VALUES ('schema_checked_panel', ?) ON DUPLICATE KEY UPDATE setting_value = ?")->execute([(string)time(), (string)time()]);
+    }
 } catch (PDOException $e) {
     die("خطا در اتصال به دیتابیس: " . htmlspecialchars($e->getMessage()));
 }
