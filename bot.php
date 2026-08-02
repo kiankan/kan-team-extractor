@@ -1390,7 +1390,23 @@ function getCustomBtnLabels($pdo): array {
 function getMenuLayout($pdo, string $menuKey): array {
     $defaults = getDefaultMenuLayouts();
     $saved    = json_decode(getSetting($pdo, 'layout_' . $menuKey, ''), true);
-    return (is_array($saved) && !empty($saved)) ? $saved : ($defaults[$menuKey] ?? []);
+    $layout   = (is_array($saved) && !empty($saved)) ? $saved : ($defaults[$menuKey] ?? []);
+
+    // اگه دکمه‌ی جدیدی به رجیستری اضافه شده باشه (مثل «تست سرورها») که توی چیدمان
+    // ذخیره‌شده‌ی قبلی (از قبل از اضافه‌شدنش) نیست، خودکار به‌عنوان یه ردیف جدید
+    // ته چیدمان اضافه می‌شه؛ این‌طوری دیگه لازم نیست حتماً از پنل وب دستی درگش کنی.
+    $registry = getBtnRegistry();
+    $used = [];
+    foreach ($layout as $row) {
+        if (is_array($row)) foreach ($row as $k) $used[$k] = true;
+    }
+    foreach ($registry as $key => $def) {
+        if (($def['menu'] ?? '') === $menuKey && empty($used[$key])) {
+            $layout[] = [$key];
+        }
+    }
+
+    return $layout;
 }
 
 // کلیدهای دکمه‌ای که همیشه باید فقط زیرمجموعه‌ی دکمه‌ی «💾 بک‌آپ» باشند
