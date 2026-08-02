@@ -429,6 +429,66 @@ class AdvancedSubExtractor {
         }
         return ucfirst($parts[0] ?? 'custom') . ' Config';
     }
+
+    /**
+     * هاست و پورت واقعی سرور رو از متن خام کانفیگ در میاره (برای فیچر «تست سرورها»).
+     * نسخه‌ی این کلاس داخل bot.php از inc_extractor.php جداست، برای همین این متد
+     * اینجا هم جدا تعریف شده (منطقش با extractHostPort جاوااسکریپتی sub_view.php یکیه).
+     */
+    public function extractHostPort(string $raw): array {
+        $empty = ['host' => '', 'port' => ''];
+        if ($raw === '') return $empty;
+
+        if (!preg_match('#^([a-z0-9]+)://#i', $raw, $sm)) return $empty;
+        $scheme = strtolower($sm[1]);
+
+        try {
+            // vmess:// base64(json) با فیلدهای add و port
+            if ($scheme === 'vmess') {
+                $body = explode('#', substr($raw, 8))[0];
+                $body = explode('?', $body)[0];
+                $decoded = $this->safeBase64Decode($body);
+                $json = $decoded !== null ? json_decode($decoded, true) : null;
+                if (is_array($json)) {
+                    return ['host' => (string)($json['add'] ?? ''), 'port' => (string)($json['port'] ?? '')];
+                }
+                return $empty;
+            }
+
+            // ssr:// base64(host:port:protocol:method:obfs:base64pass/?params)
+            if ($scheme === 'ssr') {
+                $body = explode('#', substr($raw, 6))[0];
+                $decoded = $this->safeBase64Decode($body) ?? '';
+                if (preg_match('/^([^:]+):(\d+):/', $decoded, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                return $empty;
+            }
+
+            // ss:// دو شکل شناخته‌شده: ss://method:pass@host:port یا ss://BASE64(...)
+            if ($scheme === 'ss') {
+                $rest = explode('#', substr($raw, 5))[0];
+                if (preg_match('/@([^:\/?#]+):(\d+)/', $rest, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                $decoded = $this->safeBase64Decode(explode('?', $rest)[0]) ?? '';
+                if (preg_match('/@([^:\/?#]+):(\d+)/', $decoded, $m)) {
+                    return ['host' => $m[1], 'port' => $m[2]];
+                }
+                return $empty;
+            }
+
+            // فرم عمومی برای vless, trojan, hysteria, hysteria2/hy2, tuic, socks, http(s)
+            if (preg_match('~^[a-z0-9]+://(?:[^@/?#]*@)?(\[[^\]]+\]|[^:/?#]+)(?::(\d+))?~i', $raw, $m)) {
+                $host = trim($m[1], '[]');
+                return ['host' => $host, 'port' => $m[2] ?? ''];
+            }
+        } catch (\Throwable $e) {
+            return $empty;
+        }
+
+        return $empty;
+    }
 }
 
 date_default_timezone_set('Asia/Tehran');
@@ -498,39 +558,50 @@ try {
         PDO::ATTR_EMULATE_PREPARES   => false
     ]);
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `users` (`user_id` BIGINT PRIMARY KEY, `points` INT DEFAULT 0, `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `user_states` (`user_id` BIGINT PRIMARY KEY, `state` VARCHAR(50) NOT NULL, `data` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    // این چک/ساخت جدول‌ها فقط باید یه‌بار (بعد از نصب یا آپدیت) اجرا بشه، نه روی
+    // تک‌تک آپدیت‌های وبهوک تلگرام؛ وگرنه هر پیام/کلیک یه کانکشن اضافه به MySQL
+    // با ۱۰+ کوئری اضافی باز می‌کنه و روی هاست‌های اشتراکی (max_connections کم)
+    // باعث خطای "Too many connections" می‌شه. فلگش رو توی همون جدول settings
+    // نگه می‌داریم (نه فایل روی دیسک)؛ اگه جدول‌ها رو دستی عوض کردی، کافیه ردیف
+    // schema_checked رو از جدول settings حذف کنی تا دوباره چک بشه.
     $pdo->exec("CREATE TABLE IF NOT EXISTS `settings` (`setting_key` VARCHAR(50) PRIMARY KEY, `setting_value` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `admins` (`admin_id` BIGINT PRIMARY KEY, `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `extractions` (
-        `token` VARCHAR(32) PRIMARY KEY,
-        `user_id` BIGINT,
-        `sub_url` TEXT,
-        `total_configs` INT DEFAULT 0,
-        `total_bytes` DOUBLE DEFAULT 0,
-        `used_bytes` DOUBLE DEFAULT 0,
-        `expire_ts` BIGINT DEFAULT 0,
-        `configs_json` LONGTEXT,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS `backup_imports` (
-        `id` INT AUTO_INCREMENT PRIMARY KEY,
-        `user_id` BIGINT,
-        `inserted_count` INT DEFAULT 0,
-        `skipped_count` INT DEFAULT 0,
-        `failed_count` INT DEFAULT 0,
-        `total_count` INT DEFAULT 0,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    $schemaChecked = $pdo->query("SELECT 1 FROM `settings` WHERE setting_key = 'schema_checked'")->fetchColumn();
+    if (!$schemaChecked) {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `users` (`user_id` BIGINT PRIMARY KEY, `points` INT DEFAULT 0, `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `user_states` (`user_id` BIGINT PRIMARY KEY, `state` VARCHAR(50) NOT NULL, `data` TEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `admins` (`admin_id` BIGINT PRIMARY KEY, `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `extractions` (
+            `token` VARCHAR(32) PRIMARY KEY,
+            `user_id` BIGINT,
+            `sub_url` TEXT,
+            `total_configs` INT DEFAULT 0,
+            `total_bytes` DOUBLE DEFAULT 0,
+            `used_bytes` DOUBLE DEFAULT 0,
+            `expire_ts` BIGINT DEFAULT 0,
+            `configs_json` LONGTEXT,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `backup_imports` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `user_id` BIGINT,
+            `inserted_count` INT DEFAULT 0,
+            `skipped_count` INT DEFAULT 0,
+            `failed_count` INT DEFAULT 0,
+            `total_count` INT DEFAULT 0,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
-    $cols = [
-        'joined_at'  => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
-        'is_blocked' => 'TINYINT(1) DEFAULT 0',
-        'is_admin'   => 'TINYINT(1) DEFAULT 0'
-    ];
-    foreach ($cols as $col => $def) {
-        if (!$pdo->query("SHOW COLUMNS FROM `users` LIKE '$col'")->fetch())
-            $pdo->exec("ALTER TABLE `users` ADD COLUMN `$col` $def;");
+        $cols = [
+            'joined_at'  => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+            'is_blocked' => 'TINYINT(1) DEFAULT 0',
+            'is_admin'   => 'TINYINT(1) DEFAULT 0'
+        ];
+        foreach ($cols as $col => $def) {
+            if (!$pdo->query("SHOW COLUMNS FROM `users` LIKE '$col'")->fetch())
+                $pdo->exec("ALTER TABLE `users` ADD COLUMN `$col` $def;");
+        }
+
+        $pdo->prepare("INSERT INTO `settings` (setting_key, setting_value) VALUES ('schema_checked', ?) ON DUPLICATE KEY UPDATE setting_value = ?")->execute([(string)time(), (string)time()]);
     }
 } catch (PDOException $e) {
     error_log("Database Connection Error: " . $e->getMessage());
