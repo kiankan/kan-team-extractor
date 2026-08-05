@@ -552,11 +552,31 @@ function jdate($format, $timestamp = null) {
 }
 
 try {
-    $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS, [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES   => false
-    ]);
+    // بعضی خطاهای اتصال به MySQL (مثل «Too many connections» یا «Resource temporarily
+    // unavailable») روی هاست‌های اشتراکی معمولاً گذرا هستن (چند صدم ثانیه بعد خودشون
+    // حل می‌شن، مخصوصاً وقتی MySQL بین چند مشتری مشترکه). به‌جای اینکه بلافاصله با
+    // exit شکست بخوریم، حداکثر ۲ بار دیگه با یه تأخیر کوتاه دوباره تلاش می‌کنیم؛
+    // اگه خطا واقعاً دائمی باشه (مثلاً رمز غلط)، همون بار اول throw می‌شه و retry نمی‌کنیم.
+    $pdo = null;
+    $dbAttempt = 0;
+    while ($pdo === null) {
+        try {
+            $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS, [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false
+            ]);
+        } catch (PDOException $connErr) {
+            $dbAttempt++;
+            $msg = $connErr->getMessage();
+            $isTransient = false;
+            foreach (['1040', '2002', '2013', 'Too many connections', 'Resource temporarily unavailable', "Can't connect", 'Lost connection'] as $needle) {
+                if (str_contains($msg, $needle)) { $isTransient = true; break; }
+            }
+            if (!$isTransient || $dbAttempt >= 3) throw $connErr;
+            usleep($dbAttempt * 400000); // تلاش دوم: ۰.۴ ثانیه صبر، تلاش سوم: ۰.۸ ثانیه صبر
+        }
+    }
 
     // این چک/ساخت جدول‌ها فقط باید یه‌بار (بعد از نصب یا آپدیت) اجرا بشه، نه روی
     // تک‌تک آپدیت‌های وبهوک تلگرام؛ وگرنه هر پیام/کلیک یه کانکشن اضافه به MySQL
@@ -713,9 +733,10 @@ function splitSqlStatements(string $sql): array {
     return $statements;
 }
 
-// ایمپورت امن: فقط دستورات INSERT روی جداول شناخته‌شده اجرا می‌شوند، همیشه با IGNORE
-// (تا رکورد تکراری خطا ندهد یا داده‌ی فعلی را دور نزند)، و هر دستور خطرناک دیگری
-// (DROP/DELETE/UPDATE/ALTER و ...) بی‌سروصدا نادیده گرفته می‌شود.
+// ایمپورت: فقط دستورات INSERT روی جداول شناخته‌شده اجرا می‌شوند؛ رکورد جدید درج می‌شه
+// و رکورد تکراری (بر اساس کلید اصلی) با مقادیر فایل بک‌آپ بروزرسانی می‌شه (ON DUPLICATE
+// KEY UPDATE) — یعنی این ایمپورت "insert-only بی‌خطر" نیست، واقعاً بازنویسی هم می‌کنه.
+// هر دستور خطرناک دیگری (DROP/DELETE/ALTER و ...) بی‌سروصدا نادیده گرفته می‌شود.
 function importDbBackupFile($pdo, string $sqlContent): array {
     $result = ['valid' => false, 'inserted' => 0, 'updated' => 0, 'unchanged' => 0, 'failed' => 0, 'total' => 0];
 
@@ -819,30 +840,6 @@ function importDbBackupFile($pdo, string $sqlContent): array {
     }
 
     return $result;
-}
-
-function createSourceBackupFile() {
-    $zipFile = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
-    if (class_exists('ZipArchive')) {
-        $zip = new ZipArchive();
-        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-            $files = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator(__DIR__),
-                RecursiveIteratorIterator::LEAVES_ONLY
-            );
-            foreach ($files as $file) {
-                if (!$file->isDir()) {
-                    $filePath     = $file->getRealPath();
-                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
-                    if ($relativePath !== $zipFile && $relativePath !== 'config.php')
-                        $zip->addFile($filePath, $relativePath);
-                }
-            }
-            $zip->close();
-            return $zipFile;
-        }
-    }
-    return false;
 }
 
 function removeBotEmojis($text) {
@@ -1338,7 +1335,6 @@ function getBtnRegistry(): array {
         // buildMenuKeyboard() انجام می‌شود تا همیشه فقط از داخل دکمه‌ی
         // «💾 بک‌آپ» (backup_folder_nav) در دسترس باشند.
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'callback' => 'backup_db_manual',       'style' => 'primary', 'menu' => 'admin_menu'],
-        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'callback' => 'backup_source_manual',   'style' => 'primary', 'menu' => 'admin_menu'],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',          'callback' => 'restore_backup_nav',     'style' => 'danger',  'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'callback' => 'back_to_main_menu',      'style' => 'success', 'menu' => 'admin_menu'],
 
@@ -1348,13 +1344,9 @@ function getBtnRegistry(): array {
         'btn_sub_ip'     => ['label' => '🌐 دریافت آی‌پی',       'callback' => 'get_extracted_ips',     'style' => 'primary', 'menu' => 'sub_menu'],
         'btn_sub_qr1'    => ['label' => '🔲 QR کانفیگ‌ها',       'callback' => 'get_configs_qr',        'style' => 'success', 'menu' => 'sub_menu'],
         'btn_sub_qr2'    => ['label' => '🔲 QR ساب',            'callback' => 'get_qr_code',           'style' => 'primary', 'menu' => 'sub_menu'],
-        // این دکمه همیشه به‌صورت ثابت به‌عنوان آخرین ردیف زیر نتیجه‌ی استخراج
-        // نمایش داده می‌شود (چون آدرسش برای هر استخراج فرق می‌کنه) و به همین
-        // دلیل در ادیتور چیدمان/ردیف‌های «سطح استخراج» قابل جابه‌جایی نیست؛
-        // ولی متن، رنگ و ایموجی‌اش از تب‌های «برچسب‌ها/رنگ‌ها/ایموجی‌ها» در پنل
-        // وب کاملاً قابل تغییره.
         'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'callback' => null,                    'style' => 'success', 'menu' => 'sub_menu'],
         'btn_test_servers' => ['label' => '🧪 تست سرورها',    'callback' => 'test_servers_menu',     'style' => 'primary', 'menu' => 'sub_menu'],
+        'btn_sub_back'   => ['label' => '🔙 بازگشت به منوی اصلی', 'callback' => 'back_to_main_menu',  'style' => 'danger',  'menu' => 'sub_menu'],
     ];
 }
 
@@ -1373,7 +1365,8 @@ function getDefaultMenuLayouts(): array {
             ['btn_sub_update'],
             ['btn_sub_text', 'btn_sub_ip'],
             ['btn_sub_qr1', 'btn_sub_qr2'],
-            ['btn_web_view', 'btn_test_servers']
+            ['btn_web_view', 'btn_test_servers'],
+            ['btn_sub_back']
         ]
     ];
 }
@@ -1396,14 +1389,15 @@ function getMenuLayout($pdo, string $menuKey): array {
     // ذخیره‌شده‌ی قبلی (از قبل از اضافه‌شدنش) نیست، خودکار به‌عنوان یه ردیف جدید
     // ته چیدمان اضافه می‌شه؛ این‌طوری دیگه لازم نیست حتماً از پنل وب دستی درگش کنی.
     $registry = getBtnRegistry();
+    $excludedFromAdminTop = array_merge(getBackupSubOnlyKeys(), getSettingsFolderOnlyKeys());
     $used = [];
     foreach ($layout as $row) {
         if (is_array($row)) foreach ($row as $k) $used[$k] = true;
     }
     foreach ($registry as $key => $def) {
-        if (($def['menu'] ?? '') === $menuKey && empty($used[$key])) {
-            $layout[] = [$key];
-        }
+        if (($def['menu'] ?? '') !== $menuKey) continue;
+        if ($menuKey === 'admin_menu' && in_array($key, $excludedFromAdminTop, true)) continue;
+        if (empty($used[$key])) $layout[] = [$key];
     }
 
     return $layout;
@@ -1413,7 +1407,15 @@ function getMenuLayout($pdo, string $menuKey): array {
 // و هرگز مستقیم در سطح اول منوی ادمین رندر نشوند (حتی اگر چیدمان
 // سفارشیِ ذخیره‌شده از پنل وب اشتباهاً آن‌ها را در همان سطح قرار داده باشد).
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_restore'];
+}
+
+// همین‌طور، این کلیدها فقط باید زیرمجموعه‌ی دکمه‌ی «⚙️ تنظیمات» (settings_folder_nav)
+// باشند، نه مستقیم در سطح اول منوی ادمین. این باگ باعث می‌شد این دکمه‌ها بعد از
+// «بازگشت به منوی اصلی» هم ردیف اضافه بشن (خودترمیم‌شوندگیِ چیدمان اونا رو به‌اشتباه
+// در سطح اول هم می‌دید، چون توی رجیستری menu=admin_menu بودن).
+function getSettingsFolderOnlyKeys(): array {
+    return ['btn_admin_reports', 'btn_admin_webpanel', 'btn_admin_settingspanel'];
 }
 
 // می‌سازد کیبورد شیشه‌ای یک منو را، بر اساس چیدمان و متن‌های ذخیره‌شده از پنل وب (webpanel.php)
@@ -1424,16 +1426,16 @@ function buildMenuKeyboard($pdo, string $menuKey, bool $isAdmin = false, bool $i
 
     $publicStatus   = getSetting($pdo, 'public_mode', '0') === '1' ? '🟢 روشن' : '🔴 خاموش';
     $showAccountBtn = getSetting($pdo, 'show_account_btn', 'on') === 'on';
-    $backupSubOnly  = getBackupSubOnlyKeys();
+    $excludedFromAdminTop = array_merge(getBackupSubOnlyKeys(), getSettingsFolderOnlyKeys());
 
     $keyboard = [];
     foreach ($layout as $row) {
         if (!is_array($row)) continue;
         $kbRow = [];
         foreach ($row as $btnKey) {
-            // فیلتر امنیتی: دکمه‌های دیتابیس/سورس/ایمپورت هرگز مستقیم در
-            // منوی ادمین ظاهر نمی‌شوند، فقط از داخل زیرمنوی بک‌آپ در دسترس‌اند.
-            if ($menuKey === 'admin_menu' && in_array($btnKey, $backupSubOnly, true)) continue;
+            // فیلتر امنیتی: دکمه‌های دیتابیس/سورس/ایمپورت و دکمه‌های زیرمنوی تنظیمات
+            // هرگز مستقیم در منوی ادمین ظاهر نمی‌شوند، فقط از داخل زیرمنوی خودشون در دسترس‌اند.
+            if ($menuKey === 'admin_menu' && in_array($btnKey, $excludedFromAdminTop, true)) continue;
 
             $def = $registry[$btnKey] ?? null;
             if (!$def || $def['menu'] !== $menuKey) continue;
@@ -1544,7 +1546,6 @@ if ($isCronRequest) {
         setSetting($pdo, 'last_cron_backup', (string)time());
 
         $dbFile  = createDbBackupFile($pdo);
-        $srcFile = createSourceBackupFile();
 
         $captionBase = "🔄 <b>بکاپ خودکار سیستم (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
         
@@ -1566,23 +1567,6 @@ if ($isCronRequest) {
             unlink($dbFile);
         }
 
-        if ($srcFile && file_exists($srcFile)) {
-            $caption = "📦 " . $captionBase;
-            sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $srcFile);
-            
-            if (defined('ADMIN_ID')) {
-                $caption = applyPremiumToText($caption); 
-                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true, 
-                    CURLOPT_POST => true, 
-                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($srcFile)), 'caption' => $caption, 'parse_mode' => 'HTML'], 
-                    CURLOPT_TIMEOUT => 30
-                ]);
-                curl_exec($ch); curl_close($ch);
-            }
-            unlink($srcFile);
-        }
         echo json_encode(["status" => "success", "message" => "Backup executed and sent successfully."]);
         exit;
     } else {
@@ -2076,12 +2060,11 @@ try {
             if (!$isAdmin) exit;
             $kb = ['inline_keyboard' => []];
             $kb['inline_keyboard'][] = [createBtn('💾 بکاپ دیتابیس', 'backup_db_manual', 'primary', 'btn_admin_db')];
-            $kb['inline_keyboard'][] = [createBtn('📦 بکاپ سورس', 'backup_source_manual', 'primary', 'btn_admin_src')];
             if ($isSupAdmin) {
                 $kb['inline_keyboard'][] = [createBtn('📥 ایمپورت بک‌آپ', 'restore_backup_nav', 'danger', 'btn_admin_restore')];
             }
             $kb['inline_keyboard'][] = [createBtn('🔙 بازگشت', 'main_admin', 'danger', 'btn_admin_back')];
-            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📦 بکاپ سورس: دریافت فایل ZIP از سورس کد\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
+            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📥 ایمپورت بک‌آپ: بازیابی فایل SQL (فقط مدیر کل)", $kb);
             exit;
         }
 
@@ -2119,7 +2102,7 @@ try {
         if ($data === 'restore_backup_nav') {
             if (!$isSupAdmin) { answerCallback($callbackId, '❌ این بخش فقط برای مدیر کل فعال است.', true); exit; }
             $pdo->prepare("INSERT INTO user_states (user_id, state, data) VALUES (?, 'WAITING_FOR_BACKUP_RESTORE', '{}') ON DUPLICATE KEY UPDATE state='WAITING_FOR_BACKUP_RESTORE', data='{}'")->execute([$chatId]);
-            editMessageText($chatId, $messageId, "📥 <b>ایمپورت هوشمند بک‌آپ</b>\n\nفایل بک‌آپ دیتابیس (<code>.sql</code>) که قبلاً از همین ربات (بکاپ دستی یا خودکار) گرفته شده را ارسال کنید.\n\n⚠️ <b>توجه:</b>\n- فقط رکوردهای <b>جدید</b> اضافه می‌شوند؛ اطلاعات فعلی شما تغییر یا حذف نمی‌شود (ایمپورت کاملاً امن).\n- فقط فایل‌های <code>.sql</code> پذیرفته می‌شوند.\n- فقط جداول شناخته‌شده‌ی ربات (کاربران، تنظیمات، مدیران، ساب‌ها) ایمپورت می‌شوند.", ['inline_keyboard' => [[createBtn('❌ انصراف', 'backup_folder_nav', 'danger', 'btn_back')]]]);
+            editMessageText($chatId, $messageId, "📥 <b>ایمپورت هوشمند بک‌آپ</b>\n\nفایل بک‌آپ دیتابیس (<code>.sql</code>) که قبلاً از همین ربات (بکاپ دستی یا خودکار) گرفته شده را ارسال کنید.\n\n⚠️ <b>توجه، این نکته مهمه:</b>\n- رکوردهای <b>جدید</b> اضافه می‌شوند و رکوردهایی که همین الان هم توی دیتابیس هستن، با مقادیر فایل بک‌آپ <b>بروزرسانی/بازنویسی</b> می‌شن (نه اینکه فقط جدیدها اضافه بشه).\n- یعنی اگه بک‌آپ قدیمی باشه، ممکنه اطلاعات جدیدتر (مثل وضعیت بلاک کاربر، مقدار امتیاز، یا حتی <b>مدیری که بعداً حذفش کرده بودی</b>) با مقدار قدیمی جایگزین بشه یا دوباره برگرده.\n- پس فقط از بک‌آپ‌های <b>تازه و مطمئن</b> استفاده کن.\n- فقط فایل‌های <code>.sql</code> پذیرفته می‌شوند.\n- فقط جداول شناخته‌شده‌ی ربات (کاربران، تنظیمات، مدیران، ساب‌ها) ایمپورت می‌شوند.", ['inline_keyboard' => [[createBtn('❌ انصراف', 'backup_folder_nav', 'danger', 'btn_back')]]]);
             exit;
         }
 
@@ -2271,13 +2254,13 @@ try {
             exit;
         }
 
-        if ($data === 'backup_db_manual' || $data === 'backup_source_manual') {
+        if ($data === 'backup_db_manual') {
             if (!$isAdmin) exit;
             answerCallback($callbackId, "⏳ در حال آماده‌سازی و ارسال...");
-            $file = ($data === 'backup_db_manual') ? createDbBackupFile($pdo) : createSourceBackupFile();
+            $file = createDbBackupFile($pdo);
             
             if ($file && file_exists($file)) {
-                $caption = ($data === 'backup_db_manual') ? "💾 <b>بکاپ دستی دیتابیس</b>" : "📦 <b>بکاپ دستی سورس کد</b>";
+                $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
                 
                 $adminCaption = applyPremiumToText($caption); 
                 $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");

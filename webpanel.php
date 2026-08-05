@@ -21,11 +21,26 @@ require_once 'config.php';
 // اتصال به دیتابیس + اطمینان از وجود جدول‌های لازم (هماهنگ با bot.php)
 // ------------------------------------------------------------------
 try {
-    $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS, [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES   => false
-    ]);
+    $pdo = null;
+    $dbAttempt = 0;
+    while ($pdo === null) {
+        try {
+            $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS, [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false
+            ]);
+        } catch (PDOException $connErr) {
+            $dbAttempt++;
+            $msg = $connErr->getMessage();
+            $isTransient = false;
+            foreach (['1040', '2002', '2013', 'Too many connections', 'Resource temporarily unavailable', "Can't connect", 'Lost connection'] as $needle) {
+                if (str_contains($msg, $needle)) { $isTransient = true; break; }
+            }
+            if (!$isTransient || $dbAttempt >= 3) throw $connErr;
+            usleep($dbAttempt * 400000);
+        }
+    }
     // مثل bot.php، این چک/ساخت جدول‌ها هم فقط باید یه‌بار اجرا بشه نه هر بار که ادمین
     // پنل رو باز می‌کنه. فلگش توی جدول settings نگه داشته می‌شه (نه فایل روی دیسک)؛
     // کلیدش با bot.php فرق داره چون یه جدول اضافه (panel_login_throttle) هم اینجا ساخته می‌شه.
@@ -242,24 +257,6 @@ function createDbBackupFile(PDO $pdo): string {
     file_put_contents($fileName, $sqlDump);
     return $fileName;
 }
-function createSourceBackupFile(): string {
-    $zipFile = sys_get_temp_dir() . '/source_backup_' . date('Y-m-d_H-i-s') . '_' . bin2hex(random_bytes(4)) . '.zip';
-    if (class_exists('ZipArchive')) {
-        $zip = new ZipArchive();
-        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__), RecursiveIteratorIterator::LEAVES_ONLY);
-            foreach ($files as $file) {
-                if (!$file->isDir()) {
-                    $filePath     = $file->getRealPath();
-                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
-                    if ($relativePath !== 'config.php') $zip->addFile($filePath, $relativePath);
-                }
-            }
-            $zip->close();
-        }
-    }
-    return $zipFile;
-}
 
 // توکن کرون مخصوص همین نصب: از روی BOT_TOKEN شما ساخته می‌شود (نه یک مقدار
 // ثابت که در همه‌ی نصب‌های این کد یکسان باشد). دقیقاً همان مقداری است که
@@ -362,7 +359,6 @@ function getButtonRegistry(): array {
         'btn_admin_settingspanel' => ['label' => '⚙️ پنل تنظیمات کامل',       'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_settings'      => ['label' => '⚙️ تنظیمات',                'menu' => 'admin_menu'],
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'menu' => 'admin_menu', 'backup_sub_only' => true],
-        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'menu' => 'admin_menu', 'backup_sub_only' => true],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',           'menu' => 'admin_menu', 'supadmin_only' => true, 'backup_sub_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'menu' => 'admin_menu'],
 
@@ -372,18 +368,22 @@ function getButtonRegistry(): array {
         'btn_sub_ip'     => ['label' => '🌐 دریافت آی‌پی',       'menu' => 'sub_menu'],
         'btn_sub_qr1'    => ['label' => '🔲 QR کانفیگ‌ها',       'menu' => 'sub_menu'],
         'btn_sub_qr2'    => ['label' => '🔲 QR ساب',            'menu' => 'sub_menu'],
-        // آدرس این دکمه هر بار برای هر استخراج فرق می‌کنه، اما مثل بقیه‌ی دکمه‌های
-        // «سطح استخراج» در چیدمان قابل جابه‌جاییه؛ ربات موقع ارسال/بروزرسانی نتیجه،
-        // لینک همون استخراج رو داخل همین جایگاه قرار می‌ده.
         'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'menu' => 'sub_menu'],
         'btn_test_servers' => ['label' => '🧪 تست سرورها',    'menu' => 'sub_menu'],
+        'btn_sub_back'   => ['label' => '🔙 بازگشت به منوی اصلی', 'menu' => 'sub_menu'],
     ];
 }
 
 // کلیدهایی که هرگز نباید مستقیم در چیدمان سطح اول «پنل مدیریت» ظاهر شوند
 // (دقیقاً هماهنگ با getBackupSubOnlyKeys() در bot.php)
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_restore'];
+}
+
+// این کلیدها هم فقط باید زیرمجموعه‌ی دکمه‌ی «⚙️ تنظیمات» باشن، نه سطح اول منوی ادمین
+// (دقیقاً هماهنگ با getSettingsFolderOnlyKeys() در bot.php)
+function getSettingsFolderOnlyKeys(): array {
+    return ['btn_admin_reports', 'btn_admin_webpanel', 'btn_admin_settingspanel'];
 }
 
 function defaultLayouts(): array {
@@ -401,7 +401,8 @@ function defaultLayouts(): array {
             ['btn_sub_update'],
             ['btn_sub_text', 'btn_sub_ip'],
             ['btn_sub_qr1', 'btn_sub_qr2'],
-            ['btn_web_view', 'btn_test_servers']
+            ['btn_web_view', 'btn_test_servers'],
+            ['btn_sub_back']
         ]
     ];
 }
@@ -487,17 +488,11 @@ if (!isset($_GET['logout']) && !panelIpAccessAllowed($pdo, $CLIENT_IP)) {
 // ------------------------------------------------------------------
 // دانلود مستقیم بکاپ کامل (باید قبل از هر خروجی دیگری هندل شود)
 // ------------------------------------------------------------------
-if (isset($_GET['api']) && in_array($_GET['api'], ['download_db_backup', 'download_source_backup'], true)) {
+if (isset($_GET['api']) && $_GET['api'] === 'download_db_backup') {
     if (empty($_SESSION['panel_auth'])) { http_response_code(401); exit('Unauthorized'); }
-    if ($_GET['api'] === 'download_db_backup') {
-        $file = createDbBackupFile($pdo);
-        $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
-        header('Content-Type: application/sql');
-    } else {
-        $file = createSourceBackupFile();
-        $downloadName = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
-        header('Content-Type: application/zip');
-    }
+    $file = createDbBackupFile($pdo);
+    $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
+    header('Content-Type: application/sql');
     if (!file_exists($file)) { http_response_code(500); exit('Backup failed'); }
     header('Content-Disposition: attachment; filename="' . $downloadName . '"');
     header('Content-Length: ' . filesize($file));
@@ -523,7 +518,7 @@ if (isset($_GET['api'])) {
         $menuKey       = $body['menu'] ?? '';
         $layout        = $body['layout'] ?? null;
         $registry      = getButtonRegistry();
-        $backupSubOnly = getBackupSubOnlyKeys();
+        $excludedFromAdminTop = array_merge(getBackupSubOnlyKeys(), getSettingsFolderOnlyKeys());
 
         if (!in_array($menuKey, VALID_MENUS, true) || !is_array($layout)) {
             echo json_encode(['ok' => false, 'error' => 'invalid_input']); exit;
@@ -537,8 +532,8 @@ if (isset($_GET['api'])) {
                 $btnKey = (string)$btnKey;
                 if (!isset($registry[$btnKey]) || $registry[$btnKey]['menu'] !== $menuKey) continue;
                 // فیلتر امنیتی هماهنگ با bot.php: این کلیدها هرگز مستقیم در سطح
-                // اول «پنل مدیریت» ذخیره نمی‌شوند، فقط از داخل دکمه‌ی «💾 بک‌آپ» در دسترسند.
-                if ($menuKey === 'admin_menu' && in_array($btnKey, $backupSubOnly, true)) continue;
+                // اول «پنل مدیریت» ذخیره نمی‌شوند، فقط از داخل زیرمنوی خودشون در دسترسند.
+                if ($menuKey === 'admin_menu' && in_array($btnKey, $excludedFromAdminTop, true)) continue;
                 $cleanRow[] = $btnKey;
             }
             if (!empty($cleanRow)) $cleanLayout[] = $cleanRow;
@@ -739,11 +734,31 @@ if (isset($_GET['api'])) {
         setSetting($pdo, 'show_account_btn', $cur === 'on' ? 'off' : 'on');
         echo json_encode(['ok' => true, 'status' => getSetting($pdo, 'show_account_btn', 'on')]); exit;
     }
-    if ($api === 'set_sub_theme') {
-        $allowedThemes = ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'];
+    if ($api === 'set_panel_theme') {
+        $allowedPanelThemes = ['default', 'ocean', 'emerald', 'sunset', 'mono'];
         $theme = (string)($body['theme'] ?? 'default');
-        if (!in_array($theme, $allowedThemes, true)) { echo json_encode(['ok' => false]); exit; }
-        setSetting($pdo, 'sub_view_theme', $theme);
+        if (!in_array($theme, $allowedPanelThemes, true)) { echo json_encode(['ok' => false]); exit; }
+        setSetting($pdo, 'panel_theme', $theme);
+        echo json_encode(['ok' => true, 'theme' => $theme]); exit;
+    }
+    if ($api === 'set_sub_model') {
+        $model = (string)($body['model'] ?? 'modern');
+        if (!in_array($model, ['classic', 'modern', 'terminal', 'elite'], true)) { echo json_encode(['ok' => false]); exit; }
+        setSetting($pdo, 'sub_view_model', $model);
+        echo json_encode(['ok' => true, 'model' => $model]); exit;
+    }
+    if ($api === 'set_sub_theme') {
+        $model = (string)($body['model'] ?? 'modern');
+        $themesByModel = [
+            'classic'  => ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'],
+            'modern'   => ['black', 'white', 'red', 'purple', 'ocean', 'emerald'],
+            'terminal' => ['green', 'amber', 'blue', 'red', 'white', 'cyan'],
+            'elite'    => ['gold', 'platinum', 'rosegold', 'emerald', 'sapphire', 'onyx'],
+        ];
+        if (!isset($themesByModel[$model])) { echo json_encode(['ok' => false]); exit; }
+        $theme = (string)($body['theme'] ?? '');
+        if (!in_array($theme, $themesByModel[$model], true)) { echo json_encode(['ok' => false]); exit; }
+        setSetting($pdo, 'sub_view_theme_' . $model, $theme);
         echo json_encode(['ok' => true, 'theme' => $theme]); exit;
     }
 
@@ -1010,7 +1025,7 @@ if (!$isLoggedIn) {
 // ------------------------------------------------------------------
 $registry      = getButtonRegistry();
 $defaults      = defaultLayouts();
-$backupSubOnly = getBackupSubOnlyKeys();
+$excludedFromAdminTop = array_merge(getBackupSubOnlyKeys(), getSettingsFolderOnlyKeys());
 
 $savedMain  = json_decode(getSetting($pdo, 'layout_main_menu', ''), true);
 $savedAdmin = json_decode(getSetting($pdo, 'layout_admin_menu', ''), true);
@@ -1024,31 +1039,31 @@ $layoutSub   = is_array($savedSub)   && !empty($savedSub)   ? $savedSub   : $def
 // ذخیره‌شده‌ی قبلی نیست، خودکار به‌عنوان یه ردیف جدید ته چیدمان اضافه می‌شه —
 // دقیقاً هم‌راستا با همین منطق توی bot.php (getMenuLayout)، تا این تب همیشه
 // دقیقاً همون چیزی رو نشون بده که واقعاً توی تلگرام رندر می‌شه.
-function autoAppendNewButtons(array $layout, array $registry, string $menuKey): array {
+function autoAppendNewButtons(array $layout, array $registry, string $menuKey, array $excludedFromAdminTop = []): array {
     $used = [];
     foreach ($layout as $row) {
         if (is_array($row)) foreach ($row as $k) $used[$k] = true;
     }
     foreach ($registry as $key => $def) {
-        if (($def['menu'] ?? '') === $menuKey && empty($used[$key])) {
-            $layout[] = [$key];
-        }
+        if (($def['menu'] ?? '') !== $menuKey) continue;
+        if ($menuKey === 'admin_menu' && in_array($key, $excludedFromAdminTop, true)) continue;
+        if (empty($used[$key])) $layout[] = [$key];
     }
     return $layout;
 }
 $layoutMain  = autoAppendNewButtons($layoutMain,  $registry, 'main_menu');
-$layoutAdmin = autoAppendNewButtons($layoutAdmin, $registry, 'admin_menu');
+$layoutAdmin = autoAppendNewButtons($layoutAdmin, $registry, 'admin_menu', $excludedFromAdminTop);
 $layoutSub   = autoAppendNewButtons($layoutSub,   $registry, 'sub_menu');
 
 // فیلتر امنیتی هماهنگ با bot.php (buildMenuKeyboard): حتی اگر یک چیدمان قدیمی/دستکاری‌شده
-// این سه کلید را مستقیم در سطح اول «پنل مدیریت» ذخیره کرده باشد، اینجا هم حذف می‌شوند تا
+// این کلیدها را مستقیم در سطح اول «پنل مدیریت» ذخیره کرده باشد، اینجا هم حذف می‌شوند تا
 // ویرایشگر پنل وب دقیقاً همان چیزی را نشان دهد که در تلگرام واقعاً رندر می‌شود.
-$layoutAdmin = array_values(array_filter(array_map(function ($row) use ($backupSubOnly) {
+$layoutAdmin = array_values(array_filter(array_map(function ($row) use ($excludedFromAdminTop) {
     if (!is_array($row)) return $row;
-    return array_values(array_diff($row, $backupSubOnly));
+    return array_values(array_diff($row, $excludedFromAdminTop));
 }, $layoutAdmin), function ($row) { return !empty($row); }));
 
-function unusedButtons(array $registry, array $layout, string $menuKey, array $backupSubOnly = []): array {
+function unusedButtons(array $registry, array $layout, string $menuKey, array $excludedFromAdminTop = []): array {
     $used = [];
     foreach ($layout as $row) {
         if (!is_array($row)) continue;
@@ -1057,17 +1072,17 @@ function unusedButtons(array $registry, array $layout, string $menuKey, array $b
     $unused = [];
     foreach ($registry as $key => $def) {
         if ($def['menu'] !== $menuKey) continue;
-        // دکمه‌های زیرمجموعه‌ی بک‌آپ اصلاً در ادیتور چیدمان «پنل مدیریت» پیشنهاد داده نمی‌شوند
-        // چون bot.php هرگز اجازه نمی‌دهد مستقیم در آن سطح قرار بگیرند.
-        if ($menuKey === 'admin_menu' && in_array($key, $backupSubOnly, true)) continue;
+        // دکمه‌های زیرمجموعه‌ی بک‌آپ/تنظیمات اصلاً در ادیتور چیدمان «پنل مدیریت» پیشنهاد
+        // داده نمی‌شوند چون bot.php هرگز اجازه نمی‌دهد مستقیم در آن سطح قرار بگیرند.
+        if ($menuKey === 'admin_menu' && in_array($key, $excludedFromAdminTop, true)) continue;
         if (empty($used[$key])) $unused[] = $key;
     }
     return $unused;
 }
 
-$unusedMain  = unusedButtons($registry, $layoutMain, 'main_menu', $backupSubOnly);
-$unusedAdmin = unusedButtons($registry, $layoutAdmin, 'admin_menu', $backupSubOnly);
-$unusedSub   = unusedButtons($registry, $layoutSub, 'sub_menu', $backupSubOnly);
+$unusedMain  = unusedButtons($registry, $layoutMain, 'main_menu', $excludedFromAdminTop);
+$unusedAdmin = unusedButtons($registry, $layoutAdmin, 'admin_menu', $excludedFromAdminTop);
+$unusedSub   = unusedButtons($registry, $layoutSub, 'sub_menu', $excludedFromAdminTop);
 
 $customLabels = json_decode(getSetting($pdo, 'btn_labels', '{}'), true);
 if (!is_array($customLabels)) $customLabels = [];
@@ -1088,7 +1103,12 @@ $hasCustomPassword = getSetting($pdo, 'webpanel_password_hash', '') !== '';
 
 $showAccountBtn = getSetting($pdo, 'show_account_btn', 'on') === 'on';
 $publicModeOn   = getSetting($pdo, 'public_mode', '0') === '1';
-$currentSubTheme = getSetting($pdo, 'sub_view_theme', 'default');
+$currentSubModel = getSetting($pdo, 'sub_view_model', 'modern');
+if (!in_array($currentSubModel, ['classic', 'modern', 'terminal', 'elite'], true)) $currentSubModel = 'modern';
+$currentSubThemeClassic = getSetting($pdo, 'sub_view_theme_classic', 'default');
+$currentSubThemeModern  = getSetting($pdo, 'sub_view_theme_modern', 'black');
+$currentSubThemeTerminal = getSetting($pdo, 'sub_view_theme_terminal', 'green');
+$currentSubThemeElite = getSetting($pdo, 'sub_view_theme_elite', 'gold');
 
 $fjStatus       = getSetting($pdo, 'fj_status', 'off');
 $fjChannel      = getSetting($pdo, 'fj_channel', '');
@@ -1115,6 +1135,7 @@ if (!in_array($initialTab, $ALLOWED_TABS, true)) $initialTab = 'dashboard';
 :root {
     --bg-grad1: #06070c; --bg-grad2: #030308;
     --blue: #0a84ff; --purple: #bf5af2; --pink: #ff375f; --green: #30d158; --red: #ff453a; --orange: #ff9f0a; --yellow: #ffd60a;
+    --blob1: var(--blue); --blob2: var(--purple); --blob3: var(--pink);
     --glass-1: rgba(255,255,255,.055); --glass-2: rgba(255,255,255,.09); --glass-3: rgba(255,255,255,.14);
     --glass-border: rgba(255,255,255,.14); --glass-border-strong: rgba(255,255,255,.4);
     --glass-shadow: 0 22px 60px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.03);
@@ -1122,6 +1143,12 @@ if (!in_array($initialTab, $ALLOWED_TABS, true)) $initialTab = 'dashboard';
     --radius-lg: 26px; --radius-md: 18px; --radius-sm: 12px;
     --ease: cubic-bezier(.22,1,.36,1);
 }
+/* تم پنل مدیریت: فقط رنگ حباب‌های تزئینی پس‌زمینه و ته‌رنگ گرادینت اصلی رو عوض می‌کنه،
+   نه رنگ‌های معنایی کارت‌های داشبورد (blue/purple/pink/green/...) که همه‌جا استفاده می‌شن. */
+body[data-panel-theme="ocean"]{ --bg-grad1:#050b12; --bg-grad2:#020608; --blob1:#0ea5e9; --blob2:#06b6d4; --blob3:#22d3ee; }
+body[data-panel-theme="emerald"]{ --bg-grad1:#050f0a; --bg-grad2:#020a06; --blob1:#059669; --blob2:#10b981; --blob3:#34d399; }
+body[data-panel-theme="sunset"]{ --bg-grad1:#120a06; --bg-grad2:#0a0503; --blob1:#f97316; --blob2:#f43f5e; --blob3:#fbbf24; }
+body[data-panel-theme="mono"]{ --bg-grad1:#0a0a0c; --bg-grad2:#050506; --blob1:#8b8b96; --blob2:#5c5c66; --blob3:#3a3a42; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 ::selection{ background: var(--purple); color:#fff; }
 html{ scroll-behavior:smooth; }
@@ -1151,11 +1178,20 @@ body {
     -webkit-background-clip:text; background-clip:text; color:transparent;
     border-bottom:1px solid var(--glass-border); margin-bottom:8px; letter-spacing:-.2px;
 }
-.bg-blob{ position:fixed; border-radius:50%; filter:blur(120px); z-index:-2; pointer-events:none; animation: drift 20s ease-in-out infinite; mix-blend-mode:screen; }
+.bg-blob{ position:fixed; border-radius:50%; filter:blur(80px); z-index:-2; pointer-events:none; animation: drift 20s ease-in-out infinite; mix-blend-mode:screen; }
 body.input-active .bg-blob{ animation-play-state: paused; }
-.bg1{ width:560px; height:560px; background:var(--blue); opacity:.20; top:-200px; right:-140px; }
-.bg2{ width:520px; height:520px; background:var(--purple); opacity:.18; bottom:-220px; left:-160px; animation-delay:-7s; }
-.bg3{ width:380px; height:380px; background:var(--pink); opacity:.12; top:48%; left:48%; animation-delay:-13s; }
+.bg1{ width:560px; height:560px; background:var(--blob1); opacity:.20; top:-200px; right:-140px; }
+.bg2{ width:520px; height:520px; background:var(--blob2); opacity:.18; bottom:-220px; left:-160px; animation-delay:-7s; }
+.bg3{ width:380px; height:380px; background:var(--blob3); opacity:.12; top:48%; left:48%; animation-delay:-13s; }
+.panel-theme-picker{ display:flex; gap:6px; background:var(--glass-1); padding:5px; border-radius:999px; border:1px solid var(--glass-border); }
+.panel-theme-dot{ width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:transform .2s ease, border-color .2s ease; }
+.panel-theme-dot:hover{ transform:scale(1.15); }
+.panel-theme-dot.active{ border-color:#fff; }
+.pt-default{ background:linear-gradient(135deg, #0a84ff, #bf5af2); }
+.pt-ocean{ background:linear-gradient(135deg, #0ea5e9, #22d3ee); }
+.pt-emerald{ background:linear-gradient(135deg, #059669, #34d399); }
+.pt-sunset{ background:linear-gradient(135deg, #f97316, #f43f5e); }
+.pt-mono{ background:linear-gradient(135deg, #8b8b96, #3a3a42); }
 @keyframes drift { 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(-46px,32px) scale(1.12); } }
 .grain{ position:fixed; inset:0; z-index:-1; pointer-events:none;
     background-image:radial-gradient(rgba(255,255,255,.035) 1px, transparent 1px);
@@ -1371,7 +1407,8 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
 @media (max-width: 640px) { body{ padding:16px; } .label-key{ flex-basis:100%; } }
 </style>
 </head>
-<body>
+<?php $currentPanelTheme = getSetting($pdo, 'panel_theme', 'default'); if (!in_array($currentPanelTheme, ['default','ocean','emerald','sunset','mono'], true)) $currentPanelTheme = 'default'; ?>
+<body data-panel-theme="<?= htmlspecialchars($currentPanelTheme, ENT_QUOTES, 'UTF-8') ?>">
 <div class="bg-blob bg1"></div><div class="bg-blob bg2"></div><div class="bg-blob bg3"></div>
 <div class="grain"></div>
 
@@ -1406,7 +1443,16 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <h1>🧩 پنل یکپارچه مدیریت ربات</h1>
         <div class="sub">چیدمان/متن/رنگ/ایموجی دکمه‌ها، قفل کانال، گزارشات، کرون، مدیران، کاربران، تنظیمات عمومی، پیام همگانی، بکاپ و امنیت پنل — همه از یک‌جا.</div>
     </div>
-    <a class="logout" href="?logout=1">خروج ⏻</a>
+    <div style="display:flex; align-items:center; gap:14px;">
+        <div class="panel-theme-picker" id="panelThemePicker" title="تم پنل">
+            <div class="panel-theme-dot pt-default" data-theme="default" title="پیش‌فرض"></div>
+            <div class="panel-theme-dot pt-ocean" data-theme="ocean" title="اقیانوسی"></div>
+            <div class="panel-theme-dot pt-emerald" data-theme="emerald" title="زمرد"></div>
+            <div class="panel-theme-dot pt-sunset" data-theme="sunset" title="غروب"></div>
+            <div class="panel-theme-dot pt-mono" data-theme="mono" title="مونوکروم"></div>
+        </div>
+        <a class="logout" href="?logout=1">خروج ⏻</a>
+    </div>
 </div>
 
 <!-- ================= داشبورد ================= -->
@@ -1521,7 +1567,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <button class="act btn-success" onclick="saveLayout('admin_menu')">💾 ذخیره چیدمان</button>
         <button class="act btn-danger" onclick="resetLayout('admin_menu')">↩️ بازگشت به پیش‌فرض</button>
     </div>
-    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس»، «بکاپ سورس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این سه گزینه دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
+    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این دو گزینه دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
 </div>
 
 <div class="menu-section" id="section-sub_menu">
@@ -1586,11 +1632,25 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
 <!-- ================= تم ساب ================= -->
 <div class="menu-section" id="section-sub_theme">
     <div class="glass box">
-        <h3>🎨 تم رنگی صفحه‌ی «مشاهده در وب»</h3>
-        <div class="hint" style="margin-top:0;">این تم فقط روی صفحه‌ای که کاربر با زدن دکمه‌ی «مشاهده در وب» می‌بینه اعمال می‌شه (sub_view.php). با انتخاب هرکدوم، بلافاصله برای همه‌ی کاربرا فعال می‌شه.</div>
-        <div class="theme-grid" id="theme-grid">
+        <h3>🧩 مدل صفحه‌ی «مشاهده در وب»</h3>
+        <div class="hint" style="margin-top:0;">چهار مدل کاملاً متفاوت (نه فقط رنگ) در دسترسه. هرکدوم رو انتخاب کنی، تم‌های رنگی مخصوص همون مدل زیرش نشون داده می‌شه.</div>
+        <div class="theme-grid" id="model-grid" style="grid-template-columns:repeat(2, 1fr);">
+            <?php $modelList = ['classic' => ['کلاسیک', '#a855f7', '#d946ef', '#050107'], 'modern' => ['مدرن (اپ‌گرید + ذره‌ای)', '#4ff0ff', '#a06bff', '#07070b'], 'terminal' => ['ترمینال (هکری)', '#00ff66', '#4fff7a', '#020603'], 'elite' => ['الیت (لاکچری/خاص)', '#c9a876', '#e8cf9a', '#0a0906']]; ?>
+            <?php foreach ($modelList as $mKey => [$mTitle, $mc1, $mc2, $mbg]): $mActive = ($currentSubModel === $mKey); ?>
+            <div class="theme-card <?= $mActive ? 'active' : '' ?>" id="model-card-<?= $mKey ?>" onclick="setSubModel('<?= $mKey ?>')" style="background:<?= $mbg ?>; border-color:<?= $mActive ? $mc2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $mc1 ?>, <?= $mc2 ?>);"></div>
+                <div class="theme-title"><?= $mTitle ?></div>
+                <div class="theme-check"><?= $mActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="glass box" id="theme-group-classic" style="<?= $currentSubModel === 'classic' ? '' : 'display:none' ?>">
+        <h3>🎨 تم رنگی مدل کلاسیک</h3>
+        <div class="theme-grid" id="theme-grid-classic">
             <?php
-            $themeList = [
+            $themeListClassic = [
                 'default' => ['نئون بنفش',   '#a855f7', '#d946ef', '#050107'],
                 'ocean'   => ['اقیانوسی',     '#0ea5e9', '#06b6d4', '#020617'],
                 'emerald' => ['زمرد',         '#059669', '#10b981', '#020e0a'],
@@ -1598,10 +1658,82 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
                 'gold'    => ['طلایی لاکچری', '#d4af37', '#f5c542', '#060503'],
                 'crimson' => ['یاقوتی',       '#e11d48', '#f43f5e', '#0c0206'],
             ];
-            foreach ($themeList as $key => [$title, $c1, $c2, $bg]):
-                $isActive = ($currentSubTheme === $key);
+            foreach ($themeListClassic as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubThemeClassic === $key);
             ?>
-            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-<?= $key ?>" onclick="setSubTheme('<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-classic-<?= $key ?>" onclick="setSubTheme('classic', '<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
+                <div class="theme-title"><?= $title ?></div>
+                <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="glass box" id="theme-group-modern" style="<?= $currentSubModel === 'modern' ? '' : 'display:none' ?>">
+        <h3>🎨 تم رنگی مدل مدرن</h3>
+        <div class="theme-grid" id="theme-grid-modern">
+            <?php
+            $themeListModern = [
+                'black'   => ['سیاه',     '#4ff0ff', '#a06bff', '#07070b'],
+                'white'   => ['سفید',     '#2f6bff', '#7a3cff', '#f2f2f5'],
+                'red'     => ['قرمز',     '#ff3b4e', '#ff9c4f', '#0a0505'],
+                'purple'  => ['بنفش',     '#b06bff', '#4ff0ff', '#0a0713'],
+                'ocean'   => ['اقیانوسی', '#22d3ee', '#3b82f6', '#020617'],
+                'emerald' => ['زمرد',     '#10b981', '#34d399', '#020e0a'],
+            ];
+            foreach ($themeListModern as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubThemeModern === $key);
+            ?>
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-modern-<?= $key ?>" onclick="setSubTheme('modern', '<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
+                <div class="theme-title"><?= $title ?></div>
+                <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="glass box" id="theme-group-terminal" style="<?= $currentSubModel === 'terminal' ? '' : 'display:none' ?>">
+        <h3>🎨 تم رنگی مدل ترمینال</h3>
+        <div class="theme-grid" id="theme-grid-terminal">
+            <?php
+            $themeListTerminal = [
+                'green' => ['سبز (Matrix)', '#00ff66', '#4fff7a', '#020603'],
+                'amber' => ['کهربایی',       '#ffb000', '#ffcc33', '#0a0602'],
+                'blue'  => ['آبی',           '#5ac8ff', '#7fdbff', '#01040a'],
+                'red'   => ['قرمز',          '#ff5f5f', '#ff8080', '#0a0202'],
+                'white' => ['سفید (کاغذی)',  '#0a7a3d', '#2ea45e', '#f4f4f0'],
+                'cyan'  => ['سایان',          '#00fff2', '#4dfff2', '#020a0a'],
+            ];
+            foreach ($themeListTerminal as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubThemeTerminal === $key);
+            ?>
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-terminal-<?= $key ?>" onclick="setSubTheme('terminal', '<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
+                <div class="theme-title"><?= $title ?></div>
+                <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="glass box" id="theme-group-elite" style="<?= $currentSubModel === 'elite' ? '' : 'display:none' ?>">
+        <h3>🎨 تم رنگی مدل الیت</h3>
+        <div class="theme-grid" id="theme-grid-elite">
+            <?php
+            $themeListElite = [
+                'gold'     => ['طلایی',       '#c9a876', '#e8cf9a', '#0a0906'],
+                'platinum' => ['پلاتینیوم',    '#c7ccd4', '#eef1f5', '#0a0a0b'],
+                'rosegold' => ['رزگلد',        '#d9a894', '#f0c9b8', '#0c0807'],
+                'emerald'  => ['زمرد',         '#a8c9a8', '#c9e8c9', '#070b09'],
+                'sapphire' => ['یاقوت‌کبود',    '#a8bdd9', '#c9dbf0', '#070a0e'],
+                'onyx'     => ['اونیکس',       '#e8e8e8', '#ffffff', '#050505'],
+            ];
+            foreach ($themeListElite as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubThemeElite === $key);
+            ?>
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-elite-<?= $key ?>" onclick="setSubTheme('elite', '<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
                 <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
                 <div class="theme-title"><?= $title ?></div>
                 <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
@@ -1750,10 +1882,9 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <h3>💾 بکاپ کامل (دستی)</h3>
         <div class="actions">
             <a class="act btn-primary" href="?api=download_db_backup">💾 دانلود بکاپ دیتابیس (SQL)</a>
-            <a class="act btn-success" href="?api=download_source_backup">📦 دانلود بکاپ سورس (ZIP)</a>
         </div>
         <div class="hint">این فایل‌ها مستقیماً از سرور دانلود می‌شوند و به گروه گزارشات ارسال نمی‌گردند (برای ارسال به گروه از دکمه‌های داخل ربات در تلگرام استفاده کنید). برای بکاپ سریع فقط تنظیمات این پنل (چیدمان/رنگ/قفل کانال/گزارشات/کرون و ...) از تب 🧭 داشبورد استفاده کنید.</div>
-        <div class="hint">📥 برای «ایمپورت» بکاپ SQL (بازیابی امن، فقط رکوردهای جدید)، از دکمه «📥 ایمپورت بک‌آپ» که داخل زیرمنوی «💾 بک‌آپ» در منوی «⚙️ پنل مدیریت» داخل خود ربات در تلگرام قرار دارد استفاده کنید — این عملیات (آپلود فایل .sql) از داخل تلگرام انجام می‌شود، نه از این پنل وب.</div>
+        <div class="hint">📥 برای «ایمپورت» بکاپ SQL (رکوردهای جدید اضافه و رکوردهای موجود با مقادیر فایل بک‌آپ بازنویسی می‌شوند — پس فقط از بک‌آپ تازه استفاده کن)، از دکمه «📥 ایمپورت بک‌آپ» که داخل زیرمنوی «💾 بک‌آپ» در منوی «⚙️ پنل مدیریت» داخل خود ربات در تلگرام قرار دارد استفاده کنید — این عملیات (آپلود فایل .sql) از داخل تلگرام انجام می‌شود، نه از این پنل وب.</div>
     </div>
 </div>
 
@@ -1811,7 +1942,7 @@ const CUSTOM_COLORS       = <?= json_encode($customColors, JSON_UNESCAPED_UNICOD
 const CUSTOM_BTN_EMOJIS   = <?= json_encode($customBtnEmojis, JSON_UNESCAPED_UNICODE) ?>;
 const CUSTOM_TEXT_EMOJIS  = <?= json_encode($customTextEmojis, JSON_UNESCAPED_UNICODE) ?>;
 const TEXT_EMOJI_CHARS    = <?= json_encode($defaultTextEmojiChars, JSON_UNESCAPED_UNICODE) ?>;
-const BACKUP_SUB_ONLY     = <?= json_encode($backupSubOnly, JSON_UNESCAPED_UNICODE) ?>;
+const BACKUP_SUB_ONLY     = <?= json_encode($excludedFromAdminTop, JSON_UNESCAPED_UNICODE) ?>;
 const MENU_TITLES = { main_menu: 'منوی اصلی', admin_menu: 'پنل مدیریت', sub_menu: 'منوی استخراج ساب' };
 const COLOR_DEFS = [
     { key: '',        label: 'پیش‌فرض', cls: 'btn-ghost'   },
@@ -2668,12 +2799,47 @@ async function toggleAccountBtn() {
     }
 }
 
-// ---------------- تم ساب ----------------
-async function setSubTheme(theme) {
-    const data = await apiPost('set_sub_theme', { theme });
+// ---------------- مدل و تم ساب ----------------
+// ---------------- تم خود پنل مدیریت ----------------
+const pDots = document.querySelectorAll('#panelThemePicker .panel-theme-dot');
+function setActivePDot(theme){ pDots.forEach(d => d.classList.toggle('active', d.dataset.theme === theme)); }
+setActivePDot(document.body.getAttribute('data-panel-theme') || 'default');
+pDots.forEach(dot=>{
+    dot.addEventListener('click', async ()=>{
+        const theme = dot.dataset.theme;
+        const data = await apiPost('set_panel_theme', { theme });
+        if (data.ok) {
+            document.body.setAttribute('data-panel-theme', theme);
+            setActivePDot(theme);
+            showToast('🎨 تم پنل عوض شد.', 'success');
+        } else {
+            showToast('❌ خطا در ذخیره‌ی تم پنل.', 'error');
+        }
+    });
+});
+
+async function setSubModel(model) {
+    const data = await apiPost('set_sub_model', { model });
     if (data.ok) {
-        document.querySelectorAll('.theme-card').forEach(card => {
-            const active = card.id === 'theme-card-' + theme;
+        document.querySelectorAll('#model-grid .theme-card').forEach(card => {
+            const active = card.id === 'model-card-' + model;
+            card.classList.toggle('active', active);
+            card.querySelector('.theme-check').textContent = active ? '✅ فعال' : '';
+        });
+        document.getElementById('theme-group-classic').style.display = model === 'classic' ? '' : 'none';
+        document.getElementById('theme-group-modern').style.display = model === 'modern' ? '' : 'none';
+        document.getElementById('theme-group-terminal').style.display = model === 'terminal' ? '' : 'none';
+        document.getElementById('theme-group-elite').style.display = model === 'elite' ? '' : 'none';
+        showToast('🧩 مدل صفحه‌ی «مشاهده در وب» عوض شد.', 'success');
+    } else {
+        showToast('❌ خطا در ذخیره‌ی مدل.', 'error');
+    }
+}
+async function setSubTheme(model, theme) {
+    const data = await apiPost('set_sub_theme', { model, theme });
+    if (data.ok) {
+        document.querySelectorAll('#theme-grid-' + model + ' .theme-card').forEach(card => {
+            const active = card.id === 'theme-card-' + model + '-' + theme;
             card.classList.toggle('active', active);
             card.querySelector('.theme-check').textContent = active ? '✅ فعال' : '';
         });
