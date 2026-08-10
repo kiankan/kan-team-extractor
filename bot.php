@@ -693,7 +693,10 @@ function createDbBackupFile($pdo) {
         } catch (Exception $e) { }
     }
     $sqlDump .= "SET FOREIGN_KEY_CHECKS=1;\n";
-    $fileName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
+    // توی temp دیر سیستم ذخیره می‌شه، نه توی webroot — وگرنه تا قبل از unlink شدن،
+    // این فایل (شامل هش رمز پنل وب و ...) از آدرس عمومی سایت قابل دانلود می‌بود
+    // (هماهنگ با نسخه‌ی همین تابع توی webpanel.php).
+    $fileName = sys_get_temp_dir() . '/db_backup_' . date('Y-m-d_H-i-s') . '_' . bin2hex(random_bytes(4)) . '.sql';
     file_put_contents($fileName, $sqlDump);
     return $fileName;
 }
@@ -824,6 +827,11 @@ function importDbBackupFile($pdo, string $sqlContent): array {
 
     $result['valid'] = true;
 
+    // کش ستون‌های هر جدول، چون اسکیما وسط ایمپورت عوض نمی‌شه ولی این تابع ممکنه
+    // برای هزاران ردیف (یک INSERT جدا به‌ازای هر ردیف) صدا زده بشه — بدون کش، به
+    // همون تعداد SHOW COLUMNS اضافه به دیتابیس زده می‌شد.
+    $columnsCache = [];
+
     foreach ($statements as $stmtTrim) {
         if ($stmtTrim === '') continue;
 
@@ -848,11 +856,15 @@ function importDbBackupFile($pdo, string $sqlContent): array {
             $rawValues = splitSqlValueTuple($m[4]);
 
             // ستون‌هایی که واقعاً وجود دارند تشخیص داده می‌شوند تا با اسکیمای فعلی این نصب هم سازگار بماند
-            try {
-                $existingCols = array_column($pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(), 'Field');
-            } catch (\Throwable $e) {
-                $existingCols = $cols; // اگه به هر دلیلی نشد، فرض می‌کنیم همه‌ی ستون‌ها معتبرند
+            // (فقط یک‌بار به‌ازای هر جدول؛ نتیجه‌ش کش می‌شه، نه هر ردیف)
+            if (!array_key_exists($table, $columnsCache)) {
+                try {
+                    $columnsCache[$table] = array_column($pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(), 'Field');
+                } catch (\Throwable $e) {
+                    $columnsCache[$table] = null; // اگه به هر دلیلی نشد، پایین‌تر فرض می‌شه همه‌ی ستون‌ها معتبرند
+                }
             }
+            $existingCols = $columnsCache[$table] ?? $cols;
 
             // ستون‌هایی که توی بک‌آپ بودن ولی دیگه توی اسکیمای فعلی وجود ندارن، هم از لیست
             // ستون‌ها و هم از مقادیرشون حذف می‌شن — تا کل ردیف fail نشه، فقط همون ستون رد بشه
@@ -3009,8 +3021,9 @@ try {
                                 if ($resolvedIp !== $host && filter_var($resolvedIp, FILTER_VALIDATE_IP)) $ipText .= "🔗 دامنه: <code>{$host}</code>\n🟢 آی‌پی: <code>{$resolvedIp}</code>\n\n";
                                 else                                                                        $ipText .= "🟢 آی‌پی/دامنه: <code>{$host}</code>\n\n";
                             }
-                            foreach (splitTextSafely($ipText, 3900) as $idx => $msg) {
-                                $kb = ($idx == count(splitTextSafely($ipText, 3900)) - 1) ? ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]] : null;
+                            $ipMessages = splitTextSafely($ipText, 3900);
+                            foreach ($ipMessages as $idx => $msg) {
+                                $kb = ($idx == count($ipMessages) - 1) ? ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]] : null;
                                 sendMessage($chatId, $msg, $kb);
                                 usleep(250000);
                             }
