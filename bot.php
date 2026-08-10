@@ -733,6 +733,55 @@ function splitSqlStatements(string $sql): array {
     return $statements;
 }
 
+// جدا کردن مقادیر یک ردیف VALUES (...) بر اساس کاما، با نادیده گرفتن کاماهایی
+// که داخل رشته‌های تک/دابل‌کوت هستند (همون منطق splitSqlStatements ولی برای کاما)
+function splitSqlValueTuple(string $s): array {
+    $s = trim($s);
+    if (strlen($s) >= 2 && $s[0] === '(' && substr($s, -1) === ')') {
+        $s = substr($s, 1, -1);
+    }
+
+    $values    = [];
+    $current   = '';
+    $len       = strlen($s);
+    $inString  = false;
+    $quoteChar = '';
+
+    for ($i = 0; $i < $len; $i++) {
+        $char = $s[$i];
+
+        if ($inString) {
+            $current .= $char;
+            if ($char === '\\') {
+                if ($i + 1 < $len) { $current .= $s[++$i]; }
+                continue;
+            }
+            if ($char === $quoteChar) { $inString = false; }
+            continue;
+        }
+
+        if ($char === "'" || $char === '"') {
+            $inString  = true;
+            $quoteChar = $char;
+            $current  .= $char;
+            continue;
+        }
+
+        if ($char === ',') {
+            $values[] = trim($current);
+            $current  = '';
+            continue;
+        }
+
+        $current .= $char;
+    }
+
+    $trimmed = trim($current);
+    if ($trimmed !== '') $values[] = $trimmed;
+
+    return $values;
+}
+
 // ایمپورت: فقط دستورات INSERT روی جداول شناخته‌شده اجرا می‌شوند؛ رکورد جدید درج می‌شه
 // و رکورد تکراری (بر اساس کلید اصلی) با مقادیر فایل بک‌آپ بروزرسانی می‌شه (ON DUPLICATE
 // KEY UPDATE) — یعنی این ایمپورت "insert-only بی‌خطر" نیست، واقعاً بازنویسی هم می‌کنه.
@@ -782,6 +831,7 @@ function importDbBackupFile($pdo, string $sqlContent): array {
             $cols = array_map(static function ($c) {
                 return trim($c, " `\t\n\r\0\x0B");
             }, explode(',', $m[3]));
+            $rawValues = splitSqlValueTuple($m[4]);
 
             // ستون‌هایی که واقعاً وجود دارند تشخیص داده می‌شوند تا با اسکیمای فعلی این نصب هم سازگار بماند
             try {
@@ -790,21 +840,27 @@ function importDbBackupFile($pdo, string $sqlContent): array {
                 $existingCols = $cols; // اگه به هر دلیلی نشد، فرض می‌کنیم همه‌ی ستون‌ها معتبرند
             }
 
-            $updateParts = [];
-            foreach ($cols as $c) {
-                if ($c === '') continue;
-                if (!in_array($c, $existingCols, true)) continue; // ستونی که دیگه وجود نداره، نادیده گرفته می‌شود
-                $updateParts[] = "`$c` = VALUES(`$c`)";
+            // ستون‌هایی که توی بک‌آپ بودن ولی دیگه توی اسکیمای فعلی وجود ندارن، هم از لیست
+            // ستون‌ها و هم از مقادیرشون حذف می‌شن — تا کل ردیف fail نشه، فقط همون ستون رد بشه
+            $keptCols   = [];
+            $keptValues = [];
+            foreach ($cols as $idx => $c) {
+                if ($c === '' || !in_array($c, $existingCols, true)) continue;
+                $keptCols[]   = $c;
+                $keptValues[] = $rawValues[$idx] ?? 'NULL';
             }
 
-            $safeStmt = rtrim($stmtTrim, "; \t\n\r\0\x0B");
-            if (!empty($updateParts)) {
-                $safeStmt = preg_replace('/^INSERT\s+(IGNORE\s+)?INTO/i', 'INSERT INTO', $safeStmt, 1);
-                $safeStmt .= ' ON DUPLICATE KEY UPDATE ' . implode(', ', $updateParts);
-            } else {
-                // اگه هیچ ستونی برای آپدیت نبود (مثلاً جدول فقط یک ستون کلید دارد)، مثل قبل با IGNORE درج می‌شود
-                $safeStmt = preg_replace('/^INSERT\s+(IGNORE\s+)?INTO/i', 'INSERT IGNORE INTO', $safeStmt, 1);
+            if (empty($keptCols)) {
+                $result['failed']++;
+                continue; // هیچ ستون معتبری باقی نموند
             }
+
+            $updateParts = array_map(static function ($c) {
+                return "`$c` = VALUES(`$c`)";
+            }, $keptCols);
+
+            $safeStmt = "INSERT INTO `$table` (`" . implode('`, `', $keptCols) . "`) VALUES ("
+                . implode(', ', $keptValues) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $updateParts);
 
             try {
                 // در MySQL/MariaDB خروجی exec برای «INSERT ... ON DUPLICATE KEY UPDATE» این‌طور است:
