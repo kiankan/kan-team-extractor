@@ -842,6 +842,31 @@ function importDbBackupFile($pdo, string $sqlContent): array {
     return $result;
 }
 
+// بکاپ کامل سورس (تمام فایل‌های پروژه به‌جز config.php که شامل توکن/رمز دیتابیسه)
+function createSourceBackupFile() {
+    $zipFile = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
+    if (class_exists('ZipArchive')) {
+        $zip = new ZipArchive();
+        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator(__DIR__),
+                RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($files as $file) {
+                if (!$file->isDir()) {
+                    $filePath     = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
+                    if ($relativePath !== $zipFile && $relativePath !== 'config.php')
+                        $zip->addFile($filePath, $relativePath);
+                }
+            }
+            $zip->close();
+            return $zipFile;
+        }
+    }
+    return false;
+}
+
 function removeBotEmojis($text) {
     $emojis = ['🔍','🗂','📞','👨‍💼','📊','👤','👥','📢','⚙️','🔐','📝','✨','💾','📦','✍️','🔓','🔒','🔻','🤖','🔙','✅','❌','📥','🌐','🏠','🔄','📄','🔲','🔋','⏳','📌','📡','🗣','🟢','🔴','🚪','➕','🗑','👨‍💻','📂','📁','⬅️','➡️','👮‍♂️','🛠','💳','🔊','🔇','🌟','🎨','⏱','🔓','💤'];
     return trim(str_replace($emojis, '', $text));
@@ -1335,6 +1360,7 @@ function getBtnRegistry(): array {
         // buildMenuKeyboard() انجام می‌شود تا همیشه فقط از داخل دکمه‌ی
         // «💾 بک‌آپ» (backup_folder_nav) در دسترس باشند.
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'callback' => 'backup_db_manual',       'style' => 'primary', 'menu' => 'admin_menu'],
+        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'callback' => 'backup_source_manual',   'style' => 'primary', 'menu' => 'admin_menu'],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',          'callback' => 'restore_backup_nav',     'style' => 'danger',  'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'callback' => 'back_to_main_menu',      'style' => 'success', 'menu' => 'admin_menu'],
 
@@ -1407,7 +1433,7 @@ function getMenuLayout($pdo, string $menuKey): array {
 // و هرگز مستقیم در سطح اول منوی ادمین رندر نشوند (حتی اگر چیدمان
 // سفارشیِ ذخیره‌شده از پنل وب اشتباهاً آن‌ها را در همان سطح قرار داده باشد).
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
 }
 
 // همین‌طور، این کلیدها فقط باید زیرمجموعه‌ی دکمه‌ی «⚙️ تنظیمات» (settings_folder_nav)
@@ -1546,25 +1572,44 @@ if ($isCronRequest) {
         setSetting($pdo, 'last_cron_backup', (string)time());
 
         $dbFile  = createDbBackupFile($pdo);
+        $srcFile = createSourceBackupFile();
 
         $captionBase = "🔄 <b>بکاپ خودکار سیستم (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
-        
+
         if ($dbFile && file_exists($dbFile)) {
             $caption = "💾 " . $captionBase;
             sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $dbFile);
-            
+
             if (defined('ADMIN_ID')) {
-                $caption = applyPremiumToText($caption); 
+                $caption = applyPremiumToText($caption);
                 $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
                 curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true, 
-                    CURLOPT_POST => true, 
-                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($dbFile)), 'caption' => $caption, 'parse_mode' => 'HTML'], 
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($dbFile)), 'caption' => $caption, 'parse_mode' => 'HTML'],
                     CURLOPT_TIMEOUT => 30
                 ]);
                 curl_exec($ch); curl_close($ch);
             }
             unlink($dbFile);
+        }
+
+        if ($srcFile && file_exists($srcFile)) {
+            $caption = "📦 " . $captionBase;
+            sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $srcFile);
+
+            if (defined('ADMIN_ID')) {
+                $caption = applyPremiumToText($caption);
+                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($srcFile)), 'caption' => $caption, 'parse_mode' => 'HTML'],
+                    CURLOPT_TIMEOUT => 30
+                ]);
+                curl_exec($ch); curl_close($ch);
+            }
+            unlink($srcFile);
         }
 
         echo json_encode(["status" => "success", "message" => "Backup executed and sent successfully."]);
@@ -2060,11 +2105,12 @@ try {
             if (!$isAdmin) exit;
             $kb = ['inline_keyboard' => []];
             $kb['inline_keyboard'][] = [createBtn('💾 بکاپ دیتابیس', 'backup_db_manual', 'primary', 'btn_admin_db')];
+            $kb['inline_keyboard'][] = [createBtn('📦 بکاپ سورس', 'backup_source_manual', 'primary', 'btn_admin_src')];
             if ($isSupAdmin) {
                 $kb['inline_keyboard'][] = [createBtn('📥 ایمپورت بک‌آپ', 'restore_backup_nav', 'danger', 'btn_admin_restore')];
             }
             $kb['inline_keyboard'][] = [createBtn('🔙 بازگشت', 'main_admin', 'danger', 'btn_admin_back')];
-            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📥 ایمپورت بک‌آپ: بازیابی فایل SQL (فقط مدیر کل)", $kb);
+            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📦 بکاپ سورس: دریافت فایل ZIP از سورس کد\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
             exit;
         }
 
@@ -2254,15 +2300,15 @@ try {
             exit;
         }
 
-        if ($data === 'backup_db_manual') {
+        if ($data === 'backup_db_manual' || $data === 'backup_source_manual') {
             if (!$isAdmin) exit;
             answerCallback($callbackId, "⏳ در حال آماده‌سازی و ارسال...");
-            $file = createDbBackupFile($pdo);
-            
+            $file = ($data === 'backup_db_manual') ? createDbBackupFile($pdo) : createSourceBackupFile();
+
             if ($file && file_exists($file)) {
-                $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
-                
-                $adminCaption = applyPremiumToText($caption); 
+                $caption = ($data === 'backup_db_manual') ? "💾 <b>بکاپ دستی دیتابیس</b>" : "📦 <b>بکاپ دستی سورس کد</b>";
+
+                $adminCaption = applyPremiumToText($caption);
                 $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
                 curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
                     CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'document' => new CURLFile(realpath($file)), 'caption' => $adminCaption, 'parse_mode' => 'HTML'],
