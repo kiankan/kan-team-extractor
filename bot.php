@@ -2381,7 +2381,7 @@ try {
             $botPing      = round((microtime(true) - $pingStart) * 1000);
             $totalUsers   = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
             $blockedUsers = $pdo->query("SELECT COUNT(*) FROM users WHERE is_blocked=1")->fetchColumn();
-            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v2.0 team kaan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
+            editMessageText($chatId, $messageId, "📊 <b>آمار ربات:</b>\n\n👥 کاربران: <code>{$totalUsers}</code> نفر\n🚫 مسدود شده: <code>{$blockedUsers}</code> نفر\n⏱ پینگ: <code>{$botPing}ms</code>\n🏷 نسخه: <b>v2.0 team kan</b>", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'main_admin', 'success', 'btn_admin_back')]]]);
             exit;
         }
 
@@ -2955,7 +2955,7 @@ try {
                             $currentText = "✅ <b>کانفیگ‌های شما:</b>\n\n";
                             foreach ($subData['configs_list'] as $c) {
                                 $nameWithFlag = addFlagToConfigName($c['name']);
-                                $block = "📌 نام: {$nameWithFlag}\n📡 پروتکل: " . strtolower($c['protocol']) . "\n<code>{$c['raw']}</code>\n<b>team kaan</b>\n\n";
+                                $block = "📌 نام: {$nameWithFlag}\n📡 پروتکل: " . strtolower($c['protocol']) . "\n<code>{$c['raw']}</code>\n<b>team kan</b>\n\n";
                                 if (mb_strlen($currentText . $block, 'UTF-8') > 3900) { $messages[] = $currentText; $currentText = ""; }
                                 $currentText .= $block;
                             }
@@ -2983,7 +2983,7 @@ try {
                             foreach ($subData['configs_list'] as $c) {
                                 $qrUrl        = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" . urlencode($c['raw']) . "&bgcolor=255-255-255&color=0-0-0&margin=1";
                                 $nameWithFlag = addFlagToConfigName($c['name']);
-                                $caption = applyPremiumToText("📌 <b>{$nameWithFlag}</b>\n📡 " . strtoupper($c['protocol']) . "\n<b>team kaan</b>"); 
+                                $caption = applyPremiumToText("📌 <b>{$nameWithFlag}</b>\n📡 " . strtoupper($c['protocol']) . "\n<b>team kan</b>"); 
                                 $mediaGroup[] = ['type' => 'photo', 'media' => $qrUrl, 'caption' => $caption, 'parse_mode' => 'HTML'];
                                 $count++;
                                 if (count($mediaGroup) == 10 || $count == count($subData['configs_list'])) {

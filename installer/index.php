@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>نصب ربات Team Kaan</title>
+<title>نصب ربات Team Kan</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
 <style>
@@ -172,7 +172,7 @@ button.submit-btn.loading .btn-label{ opacity:.85; }
 
 <div class="container">
     <div class="logo">🚀</div>
-    <h2>نصب‌کننده ربات Team Kaan</h2>
+    <h2>نصب‌کننده ربات Team Kan</h2>
     <div class="sub">اطلاعات زیر را وارد کنید تا ربات، دیتابیس و وبهوک به‌صورت خودکار راه‌اندازی شوند.</div>
 
     <?php if ($messageBox): ?>

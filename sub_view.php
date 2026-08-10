@@ -537,7 +537,7 @@ $updatedAt = $row['created_at'] ?? '';
     </div>
 
     <div class="footer">
-        این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — <b>team kaan</b>
+        این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — <b>team kan</b>
     </div>
 </div>
 
@@ -878,7 +878,7 @@ async function refreshData() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>وضعیت اشتراک شما — Team Kaan</title>
+<title>وضعیت اشتراک شما — Team Kan</title>
 <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Vazirmatn:wght@400;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Vazirmatn:wght@400;600;700&display=swap" rel="stylesheet"></noscript>
 <style>
@@ -1027,7 +1027,7 @@ async function refreshData() {
   <div class="term-window">
     <div class="term-titlebar">
       <div class="term-dot red"></div><div class="term-dot yellow"></div><div class="term-dot green"></div>
-      <div class="term-title">Team Kaan — Subscription Monitor</div>
+      <div class="term-title">Team Kan — Subscription Monitor</div>
       <div class="theme-picker" id="termThemePicker">
         <div class="theme-dot td-green" data-theme="green" title="green"></div>
         <div class="theme-dot td-amber" data-theme="amber" title="amber"></div>
@@ -1090,7 +1090,7 @@ async function refreshData() {
     </div>
   </div>
 
-  <footer class="term-footer fa">این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — Team Kaan · exit code 0</footer>
+  <footer class="term-footer fa">این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — Team Kan · exit code 0</footer>
 </div>
 
 <div class="toast-term" id="toast"></div>
@@ -1356,7 +1356,7 @@ async function refreshData(){
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>وضعیت اشتراک شما — Team Kaan</title>
+<title>وضعیت اشتراک شما — Team Kan</title>
 <link rel="preload" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css"></noscript>
 <style>
@@ -1495,7 +1495,7 @@ async function refreshData(){
 
   <div class="crest">
     <div class="crest-mark">TK</div>
-    <div class="brand-word"><b>TEAM</b> KAAN</div>
+    <div class="brand-word"><b>TEAM</b> KAN</div>
   </div>
 
   <div class="card">
@@ -1505,7 +1505,7 @@ async function refreshData(){
     </div>
 
     <h1 class="elite-h">وضعیت اشتراک شما</h1>
-    <div class="elite-sub">دسترسی اختصاصی و امن به شبکه‌ی Team Kaan</div>
+    <div class="elite-sub">دسترسی اختصاصی و امن به شبکه‌ی Team Kan</div>
 
     <div class="stat-line">
       <span class="stat-label">حجم مصرفی</span>
@@ -1550,7 +1550,7 @@ async function refreshData(){
     </div>
   </div>
 
-  <footer class="elite-footer">این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — Team Kaan</footer>
+  <footer class="elite-footer">این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — Team Kan</footer>
 </div>
 
 <div class="toast-elite" id="toast"></div>
@@ -2050,7 +2050,7 @@ async function refreshData(){
     <div class="brand">
       <div class="brand-mark">TK</div>
       <div>
-        <div class="brand-name">Team Kaan</div>
+        <div class="brand-name">Team Kan</div>
         <div class="brand-sub">SUB · PANEL</div>
       </div>
     </div>
@@ -2141,7 +2141,7 @@ async function refreshData(){
     </div>
   </div>
 
-  <footer>این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — <b>Team Kaan</b> · این لینک تا ۵ دقیقه بعد از آخرین بروزرسانی معتبر است</footer>
+  <footer>این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — <b>Team Kan</b> · این لینک تا ۵ دقیقه بعد از آخرین بروزرسانی معتبر است</footer>
 </div>
 
 <div class="toast" id="toast"></div>

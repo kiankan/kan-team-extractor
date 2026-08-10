@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  install.sh — نصب‌کننده و ابزار مدیریت از راه دور برای بات تیم کان.
-#  (installer + remote management tool for the Team Kaan bot — supports Persian
+#  (installer + remote management tool for the Team Kan bot — supports Persian
 #  and English, pick with --lang=fa / --lang=en or the interactive prompt)
 #
 #  دو حالت اجرا:
@@ -404,7 +404,7 @@ MSG_EN=(
     [cancelled]="Cancelled."
     [uninstall_done]="Full removal complete."
 
-    [menu_header]="Team Kaan Bot management panel"
+    [menu_header]="Team Kan Bot management panel"
     [menu_1]=" 1) Service status"
     [menu_2]=" 2) Restart bot (PHP-FPM + Nginx)"
     [menu_3]=" 3) Restart all services (including MariaDB)"
