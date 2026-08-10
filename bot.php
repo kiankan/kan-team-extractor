@@ -1166,14 +1166,21 @@ function checkHostNodeLabel(string $node): string {
 }
 
 /**
- * تست پینگ واقعی (۴ بسته ICMP-style) از طریق API عمومی check-host.net/check-ping،
- * از روی نودهایی که پاس داده می‌شن. چون check-host ناهمزمانه (اول درخواست ثبت
- * می‌شه، بعد نتیجه‌ش آماده می‌شه)، این تابع تا رسیدن نتیجه‌ی همه‌ی نودها (یا رسیدن
- * به maxWaitSeconds) صبر می‌کنه.
+ * تست واقعیِ اتصال TCP به هاست:پورتِ خودِ کانفیگ، از طریق API عمومی
+ * check-host.net/check-tcp. برخلاف پینگ (ICMP) که فقط نشون می‌ده هاست جواب
+ * می‌ده یا نه (حتی وقتی سرویس VPN روی اون پورت خاموش/خراب باشه بازم پینگ ممکنه
+ * سبز بشه)، این تست دقیقاً همون پورتی که کانفیگ ازش استفاده می‌کنه رو باز
+ * می‌کنه، پس نتیجه‌ش واقعاً نشون می‌ده سرویس روی اون پورت در دسترسه یا نه.
+ * چون check-host ناهمزمانه (اول درخواست ثبت می‌شه، بعد نتیجه‌ش آماده می‌شه)،
+ * این تابع تا رسیدن نتیجه‌ی همه‌ی نودها (یا رسیدن به maxWaitSeconds) صبر می‌کنه.
  * خروجی: ['ok'=>bool, 'results'=>[node => نتیجه‌ی خام check-result]]
  */
-function checkHostPingTest(string $host, array $nodes, int $maxWaitSeconds = 15): array {
-    $url = 'https://check-host.net/check-ping?host=' . urlencode($host);
+function checkHostTcpTest(string $host, int $port, array $nodes, int $maxWaitSeconds = 12): array {
+    // اگه هاست IPv6 خامه (چند تا ':' توش داره)، باید داخل [] بذاریمش وگرنه
+    // ':port' آخرش قاطی خود آدرس می‌شه و check-host.net نمی‌تونه درست پارسش کنه
+    $hostPart = (strpos($host, ':') !== false && strpos($host, '[') === false) ? "[{$host}]" : $host;
+    $target = $hostPart . ':' . $port;
+    $url = 'https://check-host.net/check-tcp?host=' . urlencode($target);
     foreach ($nodes as $n) $url .= '&node=' . urlencode($n);
 
     $submit = checkHostHttpGet($url);
@@ -1562,6 +1569,31 @@ function getBtnRegistry(): array {
         'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'callback' => null,                    'style' => 'success', 'menu' => 'sub_menu'],
         'btn_test_servers' => ['label' => '🧪 تست سرورها',    'callback' => 'test_servers_menu',     'style' => 'primary', 'menu' => 'sub_menu'],
         'btn_sub_back'   => ['label' => '🔙 بازگشت به منوی اصلی', 'callback' => 'back_to_main_menu',  'style' => 'danger',  'menu' => 'sub_menu'],
+
+        // این کلیدها به هیچ منویی (main/sub/admin_menu) تعلق ندارن (پس توی ادیتور
+        // چیدمان پنل وب ظاهر نمی‌شن)، ولی همه‌جای کد به‌عنوان btnKey به createBtn/
+        // createUrlBtn پاس داده می‌شن — قبلاً توی این رجیستری نبودن، یعنی با اینکه
+        // کد آماده‌ی اعمال ایموجی/رنگ پرمیوم روشون بود، از هیچ تب مدیریتی (نه توی
+        // خود ربات، نه پنل وب) قابل انتخاب/تنظیم نبودن. الان اضافه شدن تا از تب
+        // «🌟 دکمه‌ها» هم قابل شخصی‌سازی باشن.
+        'btn_back'                 => ['label' => '🔙 بازگشت / لغو',                 'menu' => null],
+        'btn_admin'                => ['label' => '➕ افزودن مدیر با آیدی',           'menu' => null],
+        'btn_admin_color'          => ['label' => '🎨 تنظیم رنگ دکمه‌ها',             'menu' => null],
+        'btn_admin_emoji'          => ['label' => '✨ ایموجی دکمه‌ها',                'menu' => null],
+        'btn_admin_search'         => ['label' => '🔍 جستجو کاربر',                  'menu' => null],
+        'btn_admin_text_emoji'     => ['label' => '📝 ایموجی متن‌ها',                 'menu' => null],
+        'btn_block'                => ['label' => '🔒 مسدود / رفع مسدود کاربر',       'menu' => null],
+        'btn_change_webpanel_pass' => ['label' => '🔑 تغییر رمز پنل وب',              'menu' => null],
+        'btn_channel'              => ['label' => '📢 ورود به کانال',                'menu' => null],
+        'btn_check_join'           => ['label' => '✅ عضو شدم',                       'menu' => null],
+        'btn_fj_remove'            => ['label' => '🗑 حذف کانال (قفل عضویت)',         'menu' => null],
+        'btn_fj_set'               => ['label' => '➕ تنظیم کانال (قفل عضویت)',        'menu' => null],
+        'btn_fj_toggle'            => ['label' => '🔄 تغییر وضعیت قفل کانال',          'menu' => null],
+        'btn_open_settings_panel'  => ['label' => '⚙️ باز کردن پنل تنظیمات کامل',      'menu' => null],
+        'btn_open_webpanel'        => ['label' => '🌐 باز کردن پنل وب',               'menu' => null],
+        'btn_report_toggle'        => ['label' => '🔄 تغییر وضعیت گزارشات',           'menu' => null],
+        'btn_send_msg'             => ['label' => '✍️ ارسال پیام به کاربر',           'menu' => null],
+        'btn_test_server_item'     => ['label' => '🧪 آیتم لیست تست سرورها',          'menu' => null],
     ];
 }
 
@@ -2759,13 +2791,14 @@ try {
             }
 
             $srv  = $servers[$idx];
+            $port = (int)($srv['port'] ?: 443);
             $safeName = mb_strimwidth((string)$srv['name'], 0, 60, '…');
             $backKb = ['inline_keyboard' => [[createBtn('🔙 بازگشت به لیست سرورها', 'test_servers_menu', 'danger', 'btn_back')]]];
 
             answerCallback($callbackId, '', false);
-            editMessageText($chatId, $messageId, "⏳ <b>لطفاً منتظر بمانید...</b>\n\nدر حال پینگ گرفتن از:\n{$safeName}\n<code>{$srv['host']}</code>\n\nتست از " . count(CHECK_HOST_TEST_NODES) . " نود واقعی (ایران/آلمان/هلند) انجام می‌شه، ممکنه چند ثانیه طول بکشه.");
+            editMessageText($chatId, $messageId, "⏳ <b>لطفاً منتظر بمانید...</b>\n\nدر حال تست اتصال به:\n{$safeName}\n<code>{$srv['host']}:{$port}</code>\n\nتست از " . count(CHECK_HOST_TEST_NODES) . " نود واقعی (ایران/آلمان/هلند) انجام می‌شه، ممکنه چند ثانیه طول بکشه.");
 
-            $chRes = checkHostPingTest($srv['host'], CHECK_HOST_TEST_NODES);
+            $chRes = checkHostTcpTest($srv['host'], $port, CHECK_HOST_TEST_NODES);
 
             if (!$chRes['ok']) {
                 editMessageText($chatId, $messageId, "❌ ارتباط با سرویس تست (check-host.net) برقرار نشد؛ دوباره امتحان کن.", $backKb);
@@ -2774,33 +2807,20 @@ try {
 
             $lines = [];
             foreach (CHECK_HOST_TEST_NODES as $n) {
-                $label     = checkHostNodeLabel($n);
-                $attempts  = $chRes['results'][$n][0] ?? null;
-                if (!is_array($attempts) || empty($attempts)) {
+                $label      = checkHostNodeLabel($n);
+                $nodeResult = $chRes['results'][$n] ?? null;
+                if (!is_array($nodeResult) || !isset($nodeResult[0])) {
                     $lines[] = "🔴 {$label} - بدون پاسخ (تایم‌اوت نود)";
-                    continue;
-                }
-
-                $total = count($attempts);
-                $okCount = 0;
-                $times   = [];
-                foreach ($attempts as $attempt) {
-                    if (($attempt[0] ?? '') === 'OK') {
-                        $okCount++;
-                        $times[] = (float)($attempt[1] ?? 0);
-                    }
-                }
-
-                if ($okCount > 0) {
-                    $avgMs = round((array_sum($times) / count($times)) * 1000, 3);
-                    $emoji = ($okCount === $total) ? '🟢' : '🔴';
-                    $lines[] = "{$emoji} {$label} - {$okCount}\\{$total} {$avgMs}ms";
+                } elseif (isset($nodeResult[0]['time'])) {
+                    $ms = round(((float)$nodeResult[0]['time']) * 1000, 2);
+                    $lines[] = "🟢 {$label} - وصل شد ({$ms}ms)";
                 } else {
-                    $lines[] = "🔴 {$label} - 0\\{$total} بدون پاسخ";
+                    $errMsg = $nodeResult[0]['error'] ?? 'اتصال برقرار نشد';
+                    $lines[] = "🔴 {$label} - {$errMsg}";
                 }
             }
 
-            $resultText = "🧪 <b>نتیجه‌ی تست پینگ سرور</b>\n<b>{$safeName}</b>\n<code>{$srv['host']}</code>\n\n" . implode("\n", $lines);
+            $resultText = "🧪 <b>نتیجه‌ی تست اتصال سرور</b>\n<b>{$safeName}</b>\n<code>{$srv['host']}:{$port}</code>\n\n" . implode("\n", $lines);
             editMessageText($chatId, $messageId, $resultText, $backKb);
             exit;
         }

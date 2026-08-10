@@ -371,6 +371,29 @@ function getButtonRegistry(): array {
         'btn_web_view'   => ['label' => '🖥 مشاهده در وب',     'menu' => 'sub_menu'],
         'btn_test_servers' => ['label' => '🧪 تست سرورها',    'menu' => 'sub_menu'],
         'btn_sub_back'   => ['label' => '🔙 بازگشت به منوی اصلی', 'menu' => 'sub_menu'],
+
+        // این کلیدها به هیچ منویی تعلق ندارن (توی ادیتور چیدمان نمایش داده نمی‌شن)، ولی
+        // توی bot.php به‌عنوان btnKey به createBtn/createUrlBtn پاس داده می‌شن — قبلاً
+        // توی این رجیستری نبودن، یعنی از تب «🌟 دکمه‌ها» قابل شخصی‌سازی نبودن. دقیقاً
+        // هماهنگ با getBtnRegistry() در bot.php.
+        'btn_back'                 => ['label' => '🔙 بازگشت / لغو',                 'menu' => null],
+        'btn_admin'                => ['label' => '➕ افزودن مدیر با آیدی',           'menu' => null],
+        'btn_admin_color'          => ['label' => '🎨 تنظیم رنگ دکمه‌ها',             'menu' => null],
+        'btn_admin_emoji'          => ['label' => '✨ ایموجی دکمه‌ها',                'menu' => null],
+        'btn_admin_search'         => ['label' => '🔍 جستجو کاربر',                  'menu' => null],
+        'btn_admin_text_emoji'     => ['label' => '📝 ایموجی متن‌ها',                 'menu' => null],
+        'btn_block'                => ['label' => '🔒 مسدود / رفع مسدود کاربر',       'menu' => null],
+        'btn_change_webpanel_pass' => ['label' => '🔑 تغییر رمز پنل وب',              'menu' => null],
+        'btn_channel'              => ['label' => '📢 ورود به کانال',                'menu' => null],
+        'btn_check_join'           => ['label' => '✅ عضو شدم',                       'menu' => null],
+        'btn_fj_remove'            => ['label' => '🗑 حذف کانال (قفل عضویت)',         'menu' => null],
+        'btn_fj_set'               => ['label' => '➕ تنظیم کانال (قفل عضویت)',        'menu' => null],
+        'btn_fj_toggle'            => ['label' => '🔄 تغییر وضعیت قفل کانال',          'menu' => null],
+        'btn_open_settings_panel'  => ['label' => '⚙️ باز کردن پنل تنظیمات کامل',      'menu' => null],
+        'btn_open_webpanel'        => ['label' => '🌐 باز کردن پنل وب',               'menu' => null],
+        'btn_report_toggle'        => ['label' => '🔄 تغییر وضعیت گزارشات',           'menu' => null],
+        'btn_send_msg'             => ['label' => '✍️ ارسال پیام به کاربر',           'menu' => null],
+        'btn_test_server_item'     => ['label' => '🧪 آیتم لیست تست سرورها',          'menu' => null],
     ];
 }
 
