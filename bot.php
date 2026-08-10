@@ -47,6 +47,19 @@ class AdvancedSubExtractor {
         return $result;
     }
 
+    // پارس یک پاسخِ از قبل دریافت‌شده (بدون دوباره fetch کردن) — برای وقتی که خودِ
+    // fetch با curl_multi و موازی با درخواست‌های دیگه انجام شده (fetchSubAndHeaderParallel)
+    public function extractFromResponse(string $response): array {
+        $configs = $this->parseAny($response);
+        return $this->buildResult($configs);
+    }
+
+    // نسخه‌ی عمومی fetchUrl، برای زمانی که orchestration بیرونی (مثل curl_multi
+    // موازی) نیاز به گرفتن پاسخ خام داره ولی پارسش رو بعداً با extractFromResponse انجام می‌ده
+    public function fetchRaw(string $url, bool $useBrowserUA = false): ?string {
+        return $this->fetchUrl($url, $useBrowserUA);
+    }
+
     private function parseAny(string $response): array {
         if ($this->isClashYaml($response)) {
             return $this->parseClashYaml($response);
@@ -78,7 +91,8 @@ class AdvancedSubExtractor {
             CURLOPT_MAXREDIRS      => 5,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_TIMEOUT        => 25,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT        => 15,
             CURLOPT_USERAGENT      => $useBrowserUA
                 ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
                 : 'v2rayNG/1.8.18',
@@ -1303,28 +1317,15 @@ function editMessageText($chatId, int $messageId, string $text, ?array $replyMar
     curl_close($ch);
 }
 
-function getSubHeaderInfo($url) {
+// خروجی خام curl (که CURLOPT_HEADER روش true بوده) رو پارس می‌کنه — جدا شده
+// از getSubHeaderInfo() تا هم مسیر معمولی و هم مسیر موازی (fetchSubAndHeaderParallel)
+// بتونن از همین یه تابع استفاده کنن، بدون تکرار کد پارس هدر.
+function parseSubHeaderResponse(?string $response, int $httpCode, string $curlError): array {
     $info = ['upload' => 0, 'download' => 0, 'total' => 0, 'expire' => 0, 'error_details' => null];
-    $ch   = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT      => 'v2rayNG/1.8.18',
-        CURLOPT_TIMEOUT        => 15,
-        CURLOPT_HEADER         => true, 
-    ]);
-    
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
 
     if ($curlError) {
         $info['error_details'] = "cURL Error: " . $curlError;
-    } 
-    elseif ($httpCode !== 200) {
+    } elseif ($httpCode !== 200) {
         $info['error_details'] = "Server Error: " . $httpCode;
     }
 
@@ -1334,8 +1335,124 @@ function getSubHeaderInfo($url) {
             if (count($kv) == 2) $info[trim($kv[0])] = (float)trim($kv[1]);
         }
     }
-    
+
     return $info;
+}
+
+function getSubHeaderInfo($url) {
+    $ch   = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT      => 'v2rayNG/1.8.18',
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HEADER         => true,
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    return parseSubHeaderResponse($response, (int)$httpCode, $curlError);
+}
+
+// همزمان (موازی، با curl_multi) هم پاسخ کامل ساب رو برای استخراج کانفیگ‌ها می‌گیره
+// و هم هدر subscription-userinfo رو — به‌جای دو درخواست پشت‌سرهم که مجموع زمان
+// انتظارشون جمع می‌شه (تا ۴۰ ثانیه!)، الان حداکثر زمان انتظار برابر کندترین‌شونه.
+// خروجی: ['subData'=>array, 'headerInfo'=>array] — دقیقاً هم‌شکل با فراخوانی جدا
+// extractSubscription()+getSubHeaderInfo().
+function fetchSubAndHeaderParallel(string $url): array {
+    $extractor = new AdvancedSubExtractor();
+
+    $chBody = curl_init($url);
+    curl_setopt_array($chBody, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS      => 5,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_USERAGENT      => 'v2rayNG/1.8.18',
+        CURLOPT_ENCODING       => "",
+        CURLOPT_HTTPHEADER     => [
+            'Accept: application/json, text/plain, */*',
+            'Accept-Encoding: gzip, deflate',
+            'Connection: keep-alive',
+        ],
+    ]);
+
+    $chHeader = curl_init($url);
+    curl_setopt_array($chHeader, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT      => 'v2rayNG/1.8.18',
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HEADER         => true,
+    ]);
+
+    $mh = curl_multi_init();
+    curl_multi_add_handle($mh, $chBody);
+    curl_multi_add_handle($mh, $chHeader);
+
+    $running = null;
+    do {
+        $status = curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 1.0);
+    } while ($running && $status === CURLM_OK);
+
+    $bodyResponse   = curl_multi_getcontent($chBody);
+    $bodyHttpCode   = curl_getinfo($chBody, CURLINFO_HTTP_CODE);
+    $bodyCurlError  = curl_error($chBody);
+    $headerResponse = curl_multi_getcontent($chHeader);
+    $headerHttpCode = curl_getinfo($chHeader, CURLINFO_HTTP_CODE);
+    $headerCurlError = curl_error($chHeader);
+
+    curl_multi_remove_handle($mh, $chBody);
+    curl_multi_remove_handle($mh, $chHeader);
+    curl_multi_close($mh);
+    curl_close($chBody);
+    curl_close($chHeader);
+
+    $bodyResponse = ($bodyResponse === false || $bodyResponse === '') ? null : $bodyResponse;
+    if ($bodyResponse !== null && function_exists('gzdecode') && substr($bodyResponse, 0, 2) === "\x1f\x8b") {
+        $bodyResponse = gzdecode($bodyResponse) ?: $bodyResponse;
+    }
+
+    if ($bodyResponse !== null) {
+        $subData = $extractor->extractFromResponse($bodyResponse);
+    } else {
+        $subData = ['total_configs' => 0, 'protocols' => [], 'configs_list' => [], 'error' => 'خطا در دریافت لینک یا بلاک شدن توسط سرور'];
+    }
+
+    // اگه هیچ کانفیگی پیدا نشد، یک‌بار دیگه با هدر یک مرورگر معمولی امتحان کن (بعضی
+    // سرورها مثل Cloudflare Workers کلاینت‌های وی‌پی‌ان رو بلاک می‌کنن) — این یکی
+    // دیگه موازی نیست چون فقط یه fallback نادره، نه مسیر معمول
+    if (($subData['total_configs'] ?? 0) === 0) {
+        $retryResponse = $extractor->fetchRaw($url, true);
+        if ($retryResponse !== null && $retryResponse !== $bodyResponse) {
+            $retryData = $extractor->extractFromResponse($retryResponse);
+            if (($retryData['total_configs'] ?? 0) > 0) $subData = $retryData;
+        }
+    }
+    if (($subData['total_configs'] ?? 0) === 0 && !isset($subData['debug'])) {
+        $subData['debug'] = [
+            'http_code'  => (int)$bodyHttpCode,
+            'curl_error' => $bodyCurlError !== '' ? $bodyCurlError : null,
+            'snippet'    => $bodyResponse !== null ? mb_substr($bodyResponse, 0, 200, 'UTF-8') : null,
+        ];
+    }
+
+    $headerInfo = parseSubHeaderResponse($headerResponse, (int)$headerHttpCode, (string)$headerCurlError);
+
+    return ['subData' => $subData, 'headerInfo' => $headerInfo];
 }
 
 function getWebRootUrl(): string {
@@ -1360,6 +1477,33 @@ function saveExtraction($pdo, string $token, $userId, string $subUrl, array $sub
         VALUES (?,?,?,?,?,?,?,?, NOW())
         ON DUPLICATE KEY UPDATE sub_url=VALUES(sub_url), total_configs=VALUES(total_configs), total_bytes=VALUES(total_bytes), used_bytes=VALUES(used_bytes), expire_ts=VALUES(expire_ts), configs_json=VALUES(configs_json), created_at=NOW()");
     $stmt->execute([$token, $userId, $subUrl, $subData['total_configs'] ?? 0, $totalBytes, $usedBytes, $expireTs, $configsJson]);
+}
+
+// لیست کانفیگ‌های ذخیره‌شده (که هنگام استخراج/بروزرسانی اخیر در جدول extractions
+// ذخیره شده) رو برمی‌گردونه، یا null اگه چیزی پیدا نشد.
+function getCachedConfigsList($pdo, string $viewToken): ?array {
+    if ($viewToken === '') return null;
+    $stmt = $pdo->prepare("SELECT configs_json FROM extractions WHERE token = ?");
+    $stmt->execute([$viewToken]);
+    $row = $stmt->fetch();
+    if (!$row || empty($row['configs_json'])) return null;
+    $list = json_decode($row['configs_json'], true);
+    return (is_array($list) && !empty($list)) ? $list : null;
+}
+
+// برای عملیات‌های صرفاً نمایشی روی داده‌ی همین چند دقیقه‌ی اخیر (دریافت کانفیگ/QR/آی‌پی/
+// تست سرورها) — اول سراغ کش تازه‌ی همون استخراج می‌ره تا لازم نباشه هر بار دوباره کل
+// ساب رو از سرور خارجی fetch کنه؛ فقط اگه کش نبود (مثلاً token گم شده) زنده fetch می‌کنه.
+// «🔄 بروزرسانی اطلاعات» عمداً از این تابع استفاده نمی‌کنه چون خودش قصدش گرفتن دیتای تازه‌ست.
+function getConfigsListForDisplay($pdo, string $subUrl, string $viewToken): array {
+    $cached = getCachedConfigsList($pdo, $viewToken);
+    if ($cached !== null) {
+        return ['total_configs' => count($cached), 'protocols' => [], 'configs_list' => $cached];
+    }
+    if (!class_exists('AdvancedSubExtractor')) {
+        return ['total_configs' => 0, 'protocols' => [], 'configs_list' => []];
+    }
+    return (new AdvancedSubExtractor())->extractSubscription($subUrl) ?? ['total_configs' => 0, 'protocols' => [], 'configs_list' => []];
 }
 
 function isUserInChannel($userId, string $channelId): bool {
@@ -1933,9 +2077,9 @@ try {
             if ($currentState === 'WAITING_FOR_SUB_URL') {
                 if (!filter_var($text, FILTER_VALIDATE_URL)) { sendMessage($chatId, "❌ آدرس نامعتبر است. مجدد بفرستید:"); exit; }
                 sendMessage($chatId, "⏳ در حال استخراج...");
-                $api = new AdvancedSubExtractor();
-                $subData = $api->extractSubscription($text);
-                $headerInfo = getSubHeaderInfo($text);
+                $parallel   = fetchSubAndHeaderParallel($text);
+                $subData    = $parallel['subData'];
+                $headerInfo = $parallel['headerInfo'];
 
                 if (is_array($subData) && isset($subData['total_configs']) && $subData['total_configs'] > 0) {
                     $totalBytes = (float)($headerInfo['total'] ?? 0);
@@ -2681,8 +2825,9 @@ try {
                 if ($subUrl) {
                     if ($data === 'update_sub_data') {
                         editMessageText($chatId, $messageId, "⏳ لطفا چند لحظه صبر کنید...");
-                        $headerInfo = getSubHeaderInfo($subUrl);
-                        $subData    = class_exists('AdvancedSubExtractor') ? (new AdvancedSubExtractor())->extractSubscription($subUrl) : null;
+                        $parallel   = fetchSubAndHeaderParallel($subUrl);
+                        $subData    = $parallel['subData'];
+                        $headerInfo = $parallel['headerInfo'];
                         if (is_array($subData) && isset($subData['total_configs']) && $subData['total_configs'] > 0) {
                             $totalBytes      = (float)($headerInfo['total']   ?? 0);
                             $usedBytes       = (float)($headerInfo['upload']  ?? 0) + (float)($headerInfo['download'] ?? 0);
@@ -2727,7 +2872,7 @@ try {
 
                     if ($data === 'test_servers_menu') {
                         editMessageText($chatId, $messageId, "⏳ در حال دریافت لیست سرورها...");
-                        $subData = class_exists('AdvancedSubExtractor') ? (new AdvancedSubExtractor())->extractSubscription($subUrl) : null;
+                        $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
 
                         if (is_array($subData) && !empty($subData['configs_list'])) {
                             $extractor = new AdvancedSubExtractor();
@@ -2772,8 +2917,7 @@ try {
                     }
 
                     if ($data === 'get_extracted_configs') {
-                        if (!class_exists('AdvancedSubExtractor')) { answerCallback($callbackId, "❌ اتصال برقرار نیست.", true); exit; }
-                        $subData = (new AdvancedSubExtractor())->extractSubscription($subUrl);
+                        $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
                         if (is_array($subData) && !empty($subData['configs_list'])) {
                             $messages    = [];
                             $currentText = "✅ <b>کانفیگ‌های شما:</b>\n\n";
@@ -2799,8 +2943,7 @@ try {
                     }
 
                     if ($data === 'get_configs_qr') {
-                        if (!class_exists('AdvancedSubExtractor')) { answerCallback($callbackId, "❌ اتصال برقرار نیست.", true); exit; }
-                        $subData = (new AdvancedSubExtractor())->extractSubscription($subUrl);
+                        $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
                         if (is_array($subData) && !empty($subData['configs_list'])) {
                             sendMessage($chatId, "⏳ در حال ساخت بارکد...");
                             $mediaGroup = [];
@@ -2829,8 +2972,7 @@ try {
                     }
 
                     if ($data === 'get_extracted_ips') {
-                        if (!class_exists('AdvancedSubExtractor')) { answerCallback($callbackId, "❌ اتصال برقرار نیست.", true); exit; }
-                        $subData = (new AdvancedSubExtractor())->extractSubscription($subUrl);
+                        $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
                         $ips     = [];
                         if (is_array($subData) && !empty($subData['configs_list'])) {
                             foreach ($subData['configs_list'] as $c) {

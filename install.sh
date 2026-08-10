@@ -415,6 +415,11 @@ server {
     location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:$PHP_FPM_SOCK;
+        # استخراج ساب (bot.php) گاهی چند ثانیه طول می‌کشه (اتصال به سرورهای ساب
+        # خارجی)؛ timeout پیش‌فرض nginx (۶۰ ثانیه) رو بالا می‌بریم که وسط یه
+        # استخراج کند، اتصال قطع نشه.
+        fastcgi_read_timeout 90s;
+        fastcgi_send_timeout 90s;
     }
 
     location ~ /\. { deny all; }
@@ -455,6 +460,27 @@ set_webhook() {
     else
         warn "تنظیم وب‌هوک شکست خورد. پاسخ تلگرام: $result"
     fi
+}
+
+# پنل وب توی تب «⏱ کرون» از ادمین می‌خواد که خودش یه کرون‌جاب هاست رو دستی روی
+# صدا زدن این آدرس هر ۱ دقیقه تنظیم کنه (طراحی‌شده برای هاست اشتراکی). روی یه
+# VPS که خودمون نصبش می‌کنیم، لازم نیست دستی باشه — همینجا با crontab سیستم
+# خودکارش می‌کنیم. توکن دقیقاً با همون فرمول getCronToken() توی bot.php ساخته
+# می‌شه، پس با تنظیمات «⏱ کرون» که از تلگرام/پنل وب عوض می‌شه هماهنگ می‌مونه —
+# فاصله‌ی واقعی ارسال بکاپ رو خود اپ کنترل می‌کنه، این کرون فقط هر دقیقه سرمی‌زنه.
+setup_cron_job() {
+    title "در حال تنظیم خودکار کرون‌جاب بکاپ"
+    local cron_token cron_url marker
+    cron_token="$(php -r "echo substr(hash('sha256', '$BOT_TOKEN' . '|cron_backup_secret_v1'), 0, 24);")"
+    cron_url="${SITE_URL}/bot.php?action=cron_backup&token=${cron_token}"
+    marker="# teamkan-bot-cron ($DOMAIN)"
+
+    ( crontab -l 2>/dev/null | grep -vF "$marker"
+      echo "* * * * * curl -fsS \"$cron_url\" >/dev/null 2>&1 $marker"
+    ) | crontab -
+
+    systemctl enable --now cron >/dev/null 2>&1
+    ok "کرون‌جاب خودکار تنظیم شد (هر ۱ دقیقه سرمی‌زنه؛ فاصله‌ی واقعی ارسال بکاپ رو از تب «⏱ کرون» توی پنل وب یا داخل خود ربات تغییر بده)."
 }
 
 save_conf() {
@@ -499,6 +525,7 @@ do_install_steps() {
     setup_nginx
     setup_ssl
     set_webhook
+    setup_cron_job
     save_conf
     install_management_symlink
     [[ -n "${FETCHED_SRC_DIR:-}" ]] && rm -rf "$FETCHED_SRC_DIR"
