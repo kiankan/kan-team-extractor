@@ -66,6 +66,16 @@ pause() { read -rp "برای ادامه Enter را بزنید..." _ < /dev/tty 2
 
 rand_pass() { openssl rand -hex 16; }
 
+# رشته‌ی داده‌شده رو طوری escape می‌کنه که بشه امن داخل یه رشته‌ی تک‌کوتیشن (')
+# سورس PHP جاش داد (مثلاً موقع نوشتن config.php) — بدون این، اگه توکن ربات یا
+# رمز عبور یه کوتیشن تک توش داشته باشه، فایل PHP تولیدشده سینتکسش می‌شکنه.
+php_squote_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\'/\\\'}"
+    printf '%s' "$s"
+}
+
 # یه خط ورودی تعاملی می‌خونه حتی وقتی خود اسکریپت از طریق `curl | sudo bash` پایپ
 # شده باشه (که در اون حالت stdin سورس خود اسکریپته، نه صفحه‌کلید). /dev/tty
 # همچنان همون ترمینال واقعیه تا وقتی یه ترمینال وصل باشه، پس از همونجا می‌خونیم.
@@ -328,11 +338,13 @@ deploy_files() {
     done
     shopt -u dotglob nullglob
 
+    local safe_bot_token
+    safe_bot_token="$(php_squote_escape "$BOT_TOKEN")"
     cat > "$WEBROOT/config.php" <<PHP
 <?php
 declare(strict_types=1);
 
-define('BOT_TOKEN', '$BOT_TOKEN');
+define('BOT_TOKEN', '$safe_bot_token');
 define('ADMIN_ID', $ADMIN_ID);
 
 define('DB_HOST', 'localhost');
@@ -471,13 +483,18 @@ set_webhook() {
 setup_cron_job() {
     title "در حال تنظیم خودکار کرون‌جاب بکاپ"
     local cron_token cron_url marker
-    cron_token="$(php -r "echo substr(hash('sha256', '$BOT_TOKEN' . '|cron_backup_secret_v1'), 0, 24);")"
+    # BOT_TOKEN از طریق env به php -r پاس داده می‌شه (نه رشته‌سازیِ مستقیم توی سورس
+    # PHP) که اگه توکن به هر دلیلی یه کوتیشن تک (') توش داشت، کد PHP خراب نشه.
+    cron_token="$(BOT_TOKEN="$BOT_TOKEN" php -r "echo substr(hash('sha256', getenv('BOT_TOKEN') . '|cron_backup_secret_v1'), 0, 24);")"
     cron_url="${SITE_URL}/bot.php?action=cron_backup&token=${cron_token}"
     marker="# teamkan-bot-cron ($DOMAIN)"
 
-    ( crontab -l 2>/dev/null | grep -vF "$marker"
-      echo "* * * * * curl -fsS \"$cron_url\" >/dev/null 2>&1 $marker"
-    ) | crontab -
+    if ! { crontab -l 2>/dev/null | grep -vF "$marker"
+           echo "* * * * * curl -fsS \"$cron_url\" >/dev/null 2>&1 $marker"
+         } | crontab -; then
+        warn "تنظیم خودکار کرون‌جاب شکست خورد؛ باید دستی crontab رو تنظیم کنی (crontab -e)."
+        return
+    fi
 
     systemctl enable --now cron >/dev/null 2>&1
     ok "کرون‌جاب خودکار تنظیم شد (هر ۱ دقیقه سرمی‌زنه؛ فاصله‌ی واقعی ارسال بکاپ رو از تب «⏱ کرون» توی پنل وب یا داخل خود ربات تغییر بده)."
@@ -663,7 +680,7 @@ mgmt_reset_panel_password() {
     tty_read "رمز جدید پنل رو وارد کن: " NEWPASS silent
     if [[ -z "$NEWPASS" ]]; then err "رمز نمی‌تونه خالی باشه."; return; fi
     local hash
-    hash="$(php -r "echo password_hash('$NEWPASS', PASSWORD_DEFAULT);")"
+    hash="$(NEWPASS="$NEWPASS" php -r "echo password_hash(getenv('NEWPASS'), PASSWORD_DEFAULT);")"
     mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" \
         -e "INSERT INTO settings (setting_key, setting_value) VALUES ('webpanel_password_hash', '$hash') ON DUPLICATE KEY UPDATE setting_value='$hash';" \
         && ok "رمز پنل با موفقیت تغییر کرد." \
