@@ -898,31 +898,6 @@ function importDbBackupFile($pdo, string $sqlContent): array {
     return $result;
 }
 
-// بکاپ کامل سورس (تمام فایل‌های پروژه به‌جز config.php که شامل توکن/رمز دیتابیسه)
-function createSourceBackupFile() {
-    $zipFile = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
-    if (class_exists('ZipArchive')) {
-        $zip = new ZipArchive();
-        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-            $files = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator(__DIR__),
-                RecursiveIteratorIterator::LEAVES_ONLY
-            );
-            foreach ($files as $file) {
-                if (!$file->isDir()) {
-                    $filePath     = $file->getRealPath();
-                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
-                    if ($relativePath !== $zipFile && $relativePath !== 'config.php')
-                        $zip->addFile($filePath, $relativePath);
-                }
-            }
-            $zip->close();
-            return $zipFile;
-        }
-    }
-    return false;
-}
-
 function removeBotEmojis($text) {
     $emojis = ['🔍','🗂','📞','👨‍💼','📊','👤','👥','📢','⚙️','🔐','📝','✨','💾','📦','✍️','🔓','🔒','🔻','🤖','🔙','✅','❌','📥','🌐','🏠','🔄','📄','🔲','🔋','⏳','📌','📡','🗣','🟢','🔴','🚪','➕','🗑','👨‍💻','📂','📁','⬅️','➡️','👮‍♂️','🛠','💳','🔊','🔇','🌟','🎨','⏱','🔓','💤'];
     return trim(str_replace($emojis, '', $text));
@@ -1139,37 +1114,52 @@ function answerCallback($callbackId, $text = '', $showAlert = false) {
     $isAnswered = true;
 }
 
-// نودهای check-host.net داخل ایران که برای فیچر «تست سرورها» استفاده می‌شن (شهرهای مختلف)
-const CHECK_HOST_IRAN_NODES = [
-    'ir5.node.check-host.net', // تهران
+// نودهای واقعیِ check-host.net که برای فیچر «تست سرورها» استفاده می‌شن — دقیقاً همون
+// نودهایی که check-host.net/nodes/hosts فعلاً داره (فقط همین‌ها، هیچ نود ساختگی/غیرواقعی نیست)
+const CHECK_HOST_TEST_NODES = [
+    'ir1.node.check-host.net', // تهران ۱
+    'ir5.node.check-host.net', // تهران ۲
+    'ir7.node.check-host.net', // تهران ۳
+    'ir8.node.check-host.net', // تهران ۴
     'ir2.node.check-host.net', // اصفهان
+    'ir3.node.check-host.net', // شیراز ۱
+    'ir4.node.check-host.net', // شیراز ۲
     'ir6.node.check-host.net', // قم
+    'de1.node.check-host.net', // آلمان ۱
+    'de2.node.check-host.net', // آلمان ۲
+    'de4.node.check-host.net', // آلمان ۳
+    'nl1.node.check-host.net', // هلند ۱
+    'nl2.node.check-host.net', // هلند ۲
 ];
 
 function checkHostNodeLabel(string $node): string {
     $map = [
-        'ir5.node.check-host.net' => '📍 تهران',
+        'ir1.node.check-host.net' => '📍 تهران ۱',
+        'ir5.node.check-host.net' => '📍 تهران ۲',
+        'ir7.node.check-host.net' => '📍 تهران ۳',
+        'ir8.node.check-host.net' => '📍 تهران ۴',
         'ir2.node.check-host.net' => '📍 اصفهان',
+        'ir3.node.check-host.net' => '📍 شیراز ۱',
+        'ir4.node.check-host.net' => '📍 شیراز ۲',
         'ir6.node.check-host.net' => '📍 قم',
-        'ir3.node.check-host.net' => '📍 شیراز',
-        'ir4.node.check-host.net' => '📍 شیراز',
-        'ir8.node.check-host.net' => '📍 تهران',
+        'de1.node.check-host.net' => '📍 آلمان ۱',
+        'de2.node.check-host.net' => '📍 آلمان ۲',
+        'de4.node.check-host.net' => '📍 آلمان ۳',
+        'nl1.node.check-host.net' => '📍 هلند ۱',
+        'nl2.node.check-host.net' => '📍 هلند ۲',
     ];
     return $map[$node] ?? $node;
 }
 
 /**
- * تست اتصال TCP از طریق API عمومی check-host.net، از روی نودهایی که پاس داده می‌شن.
- * چون check-host ناهمزمانه (اول درخواست ثبت می‌شه، بعد نتیجه‌ش آماده می‌شه)، این تابع
- * تا رسیدن نتیجه‌ی همه‌ی نودها (یا رسیدن به maxWaitSeconds) صبر می‌کنه.
+ * تست پینگ واقعی (۴ بسته ICMP-style) از طریق API عمومی check-host.net/check-ping،
+ * از روی نودهایی که پاس داده می‌شن. چون check-host ناهمزمانه (اول درخواست ثبت
+ * می‌شه، بعد نتیجه‌ش آماده می‌شه)، این تابع تا رسیدن نتیجه‌ی همه‌ی نودها (یا رسیدن
+ * به maxWaitSeconds) صبر می‌کنه.
  * خروجی: ['ok'=>bool, 'results'=>[node => نتیجه‌ی خام check-result]]
  */
-function checkHostTcpTest(string $host, int $port, array $nodes, int $maxWaitSeconds = 9): array {
-    // اگه هاست IPv6 خامه (چند تا ':' توش داره)، باید داخل [] بذاریمش وگرنه
-    // ':port' آخرش قاطی خود آدرس می‌شه و check-host.net نمی‌تونه درست پارسش کنه
-    $hostPart = (strpos($host, ':') !== false && strpos($host, '[') === false) ? "[{$host}]" : $host;
-    $target = $hostPart . ':' . $port;
-    $url = 'https://check-host.net/check-tcp?host=' . urlencode($target);
+function checkHostPingTest(string $host, array $nodes, int $maxWaitSeconds = 15): array {
+    $url = 'https://check-host.net/check-ping?host=' . urlencode($host);
     foreach ($nodes as $n) $url .= '&node=' . urlencode($n);
 
     $submit = checkHostHttpGet($url);
@@ -1416,7 +1406,6 @@ function getBtnRegistry(): array {
         // buildMenuKeyboard() انجام می‌شود تا همیشه فقط از داخل دکمه‌ی
         // «💾 بک‌آپ» (backup_folder_nav) در دسترس باشند.
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'callback' => 'backup_db_manual',       'style' => 'primary', 'menu' => 'admin_menu'],
-        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'callback' => 'backup_source_manual',   'style' => 'primary', 'menu' => 'admin_menu'],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',          'callback' => 'restore_backup_nav',     'style' => 'danger',  'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'callback' => 'back_to_main_menu',      'style' => 'success', 'menu' => 'admin_menu'],
 
@@ -1489,7 +1478,7 @@ function getMenuLayout($pdo, string $menuKey): array {
 // و هرگز مستقیم در سطح اول منوی ادمین رندر نشوند (حتی اگر چیدمان
 // سفارشیِ ذخیره‌شده از پنل وب اشتباهاً آن‌ها را در همان سطح قرار داده باشد).
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_restore'];
 }
 
 // همین‌طور، این کلیدها فقط باید زیرمجموعه‌ی دکمه‌ی «⚙️ تنظیمات» (settings_folder_nav)
@@ -1628,7 +1617,6 @@ if ($isCronRequest) {
         setSetting($pdo, 'last_cron_backup', (string)time());
 
         $dbFile  = createDbBackupFile($pdo);
-        $srcFile = createSourceBackupFile();
 
         $captionBase = "🔄 <b>بکاپ خودکار سیستم (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
 
@@ -1648,24 +1636,6 @@ if ($isCronRequest) {
                 curl_exec($ch); curl_close($ch);
             }
             unlink($dbFile);
-        }
-
-        if ($srcFile && file_exists($srcFile)) {
-            $caption = "📦 " . $captionBase;
-            sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $srcFile);
-
-            if (defined('ADMIN_ID')) {
-                $caption = applyPremiumToText($caption);
-                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($srcFile)), 'caption' => $caption, 'parse_mode' => 'HTML'],
-                    CURLOPT_TIMEOUT => 30
-                ]);
-                curl_exec($ch); curl_close($ch);
-            }
-            unlink($srcFile);
         }
 
         echo json_encode(["status" => "success", "message" => "Backup executed and sent successfully."]);
@@ -2161,12 +2131,11 @@ try {
             if (!$isAdmin) exit;
             $kb = ['inline_keyboard' => []];
             $kb['inline_keyboard'][] = [createBtn('💾 بکاپ دیتابیس', 'backup_db_manual', 'primary', 'btn_admin_db')];
-            $kb['inline_keyboard'][] = [createBtn('📦 بکاپ سورس', 'backup_source_manual', 'primary', 'btn_admin_src')];
             if ($isSupAdmin) {
                 $kb['inline_keyboard'][] = [createBtn('📥 ایمپورت بک‌آپ', 'restore_backup_nav', 'danger', 'btn_admin_restore')];
             }
             $kb['inline_keyboard'][] = [createBtn('🔙 بازگشت', 'main_admin', 'danger', 'btn_admin_back')];
-            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📦 بکاپ سورس: دریافت فایل ZIP از سورس کد\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
+            editMessageText($chatId, $messageId, "💾 <b>مدیریت بک‌آپ</b>\n\nاز منوی زیر گزینه مورد نظر را انتخاب کنید:\n\n• 💾 بکاپ دیتابیس: دریافت فایل SQL از دیتابیس فعلی\n• 📥 ایمپورت بک‌آپ: بازیابی امن فایل SQL (فقط مدیر کل)", $kb);
             exit;
         }
 
@@ -2356,13 +2325,13 @@ try {
             exit;
         }
 
-        if ($data === 'backup_db_manual' || $data === 'backup_source_manual') {
+        if ($data === 'backup_db_manual') {
             if (!$isAdmin) exit;
             answerCallback($callbackId, "⏳ در حال آماده‌سازی و ارسال...");
-            $file = ($data === 'backup_db_manual') ? createDbBackupFile($pdo) : createSourceBackupFile();
+            $file = createDbBackupFile($pdo);
 
             if ($file && file_exists($file)) {
-                $caption = ($data === 'backup_db_manual') ? "💾 <b>بکاپ دستی دیتابیس</b>" : "📦 <b>بکاپ دستی سورس کد</b>";
+                $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
 
                 $adminCaption = applyPremiumToText($caption);
                 $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
@@ -2646,14 +2615,13 @@ try {
             }
 
             $srv  = $servers[$idx];
-            $port = (int)($srv['port'] ?: 443);
             $safeName = mb_strimwidth((string)$srv['name'], 0, 60, '…');
             $backKb = ['inline_keyboard' => [[createBtn('🔙 بازگشت به لیست سرورها', 'test_servers_menu', 'danger', 'btn_back')]]];
 
             answerCallback($callbackId, '', false);
-            editMessageText($chatId, $messageId, "⏳ <b>لطفاً منتظر بمانید...</b>\n\nدر حال تست اتصال به:\n{$safeName}\n<code>{$srv['host']}:{$port}</code>\n\nتست از چند نود داخل ایران انجام می‌شه، ممکنه چند ثانیه طول بکشه.");
+            editMessageText($chatId, $messageId, "⏳ <b>لطفاً منتظر بمانید...</b>\n\nدر حال پینگ گرفتن از:\n{$safeName}\n<code>{$srv['host']}</code>\n\nتست از " . count(CHECK_HOST_TEST_NODES) . " نود واقعی (ایران/آلمان/هلند) انجام می‌شه، ممکنه چند ثانیه طول بکشه.");
 
-            $chRes = checkHostTcpTest($srv['host'], $port, CHECK_HOST_IRAN_NODES);
+            $chRes = checkHostPingTest($srv['host'], CHECK_HOST_TEST_NODES);
 
             if (!$chRes['ok']) {
                 editMessageText($chatId, $messageId, "❌ ارتباط با سرویس تست (check-host.net) برقرار نشد؛ دوباره امتحان کن.", $backKb);
@@ -2661,21 +2629,34 @@ try {
             }
 
             $lines = [];
-            foreach (CHECK_HOST_IRAN_NODES as $n) {
-                $label      = checkHostNodeLabel($n);
-                $nodeResult = $chRes['results'][$n] ?? null;
-                if (!is_array($nodeResult) || !isset($nodeResult[0])) {
-                    $lines[] = "{$label}: ⏳ بدون پاسخ (تایم‌اوت نود)";
-                } elseif (isset($nodeResult[0]['time'])) {
-                    $ms = (int)round($nodeResult[0]['time'] * 1000);
-                    $lines[] = "{$label}: ✅ وصل شد ({$ms}ms)";
+            foreach (CHECK_HOST_TEST_NODES as $n) {
+                $label     = checkHostNodeLabel($n);
+                $attempts  = $chRes['results'][$n][0] ?? null;
+                if (!is_array($attempts) || empty($attempts)) {
+                    $lines[] = "🔴 {$label} - بدون پاسخ (تایم‌اوت نود)";
+                    continue;
+                }
+
+                $total = count($attempts);
+                $okCount = 0;
+                $times   = [];
+                foreach ($attempts as $attempt) {
+                    if (($attempt[0] ?? '') === 'OK') {
+                        $okCount++;
+                        $times[] = (float)($attempt[1] ?? 0);
+                    }
+                }
+
+                if ($okCount > 0) {
+                    $avgMs = round((array_sum($times) / count($times)) * 1000, 3);
+                    $emoji = ($okCount === $total) ? '🟢' : '🔴';
+                    $lines[] = "{$emoji} {$label} - {$okCount}\\{$total} {$avgMs}ms";
                 } else {
-                    $errMsg = $nodeResult[0]['error'] ?? 'اتصال برقرار نشد';
-                    $lines[] = "{$label}: ❌ {$errMsg}";
+                    $lines[] = "🔴 {$label} - 0\\{$total} بدون پاسخ";
                 }
             }
 
-            $resultText = "🧪 <b>نتیجه‌ی تست سرور</b>\n<b>{$safeName}</b>\n<code>{$srv['host']}:{$port}</code>\n\n" . implode("\n", $lines);
+            $resultText = "🧪 <b>نتیجه‌ی تست پینگ سرور</b>\n<b>{$safeName}</b>\n<code>{$srv['host']}</code>\n\n" . implode("\n", $lines);
             editMessageText($chatId, $messageId, $resultText, $backKb);
             exit;
         }

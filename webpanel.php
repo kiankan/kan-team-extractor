@@ -257,24 +257,6 @@ function createDbBackupFile(PDO $pdo): string {
     file_put_contents($fileName, $sqlDump);
     return $fileName;
 }
-function createSourceBackupFile(): string {
-    $zipFile = sys_get_temp_dir() . '/source_backup_' . date('Y-m-d_H-i-s') . '_' . bin2hex(random_bytes(4)) . '.zip';
-    if (class_exists('ZipArchive')) {
-        $zip = new ZipArchive();
-        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__), RecursiveIteratorIterator::LEAVES_ONLY);
-            foreach ($files as $file) {
-                if (!$file->isDir()) {
-                    $filePath     = $file->getRealPath();
-                    $relativePath = substr($filePath, strlen(__DIR__) + 1);
-                    if ($relativePath !== 'config.php') $zip->addFile($filePath, $relativePath);
-                }
-            }
-            $zip->close();
-        }
-    }
-    return $zipFile;
-}
 
 // توکن کرون مخصوص همین نصب: از روی BOT_TOKEN شما ساخته می‌شود (نه یک مقدار
 // ثابت که در همه‌ی نصب‌های این کد یکسان باشد). دقیقاً همان مقداری است که
@@ -377,7 +359,6 @@ function getButtonRegistry(): array {
         'btn_admin_settingspanel' => ['label' => '⚙️ پنل تنظیمات کامل',       'menu' => 'admin_menu', 'supadmin_only' => true],
         'btn_admin_settings'      => ['label' => '⚙️ تنظیمات',                'menu' => 'admin_menu'],
         'btn_admin_db'            => ['label' => '💾 بکاپ دیتابیس',           'menu' => 'admin_menu', 'backup_sub_only' => true],
-        'btn_admin_src'           => ['label' => '📦 بکاپ سورس',              'menu' => 'admin_menu', 'backup_sub_only' => true],
         'btn_admin_restore'       => ['label' => '📥 ایمپورت بک‌آپ',           'menu' => 'admin_menu', 'supadmin_only' => true, 'backup_sub_only' => true],
         'btn_admin_back'          => ['label' => '🔙 بازگشت به منوی اصلی',    'menu' => 'admin_menu'],
 
@@ -396,7 +377,7 @@ function getButtonRegistry(): array {
 // کلیدهایی که هرگز نباید مستقیم در چیدمان سطح اول «پنل مدیریت» ظاهر شوند
 // (دقیقاً هماهنگ با getBackupSubOnlyKeys() در bot.php)
 function getBackupSubOnlyKeys(): array {
-    return ['btn_admin_db', 'btn_admin_src', 'btn_admin_restore'];
+    return ['btn_admin_db', 'btn_admin_restore'];
 }
 
 // این کلیدها هم فقط باید زیرمجموعه‌ی دکمه‌ی «⚙️ تنظیمات» باشن، نه سطح اول منوی ادمین
@@ -507,17 +488,11 @@ if (!isset($_GET['logout']) && !panelIpAccessAllowed($pdo, $CLIENT_IP)) {
 // ------------------------------------------------------------------
 // دانلود مستقیم بکاپ کامل (باید قبل از هر خروجی دیگری هندل شود)
 // ------------------------------------------------------------------
-if (isset($_GET['api']) && in_array($_GET['api'], ['download_db_backup', 'download_source_backup'], true)) {
+if (isset($_GET['api']) && $_GET['api'] === 'download_db_backup') {
     if (empty($_SESSION['panel_auth'])) { http_response_code(401); exit('Unauthorized'); }
-    if ($_GET['api'] === 'download_db_backup') {
-        $file = createDbBackupFile($pdo);
-        $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
-        header('Content-Type: application/sql');
-    } else {
-        $file = createSourceBackupFile();
-        $downloadName = 'source_backup_' . date('Y-m-d_H-i-s') . '.zip';
-        header('Content-Type: application/zip');
-    }
+    $file = createDbBackupFile($pdo);
+    $downloadName = 'db_backup_' . date('Y-m-d_H-i-s') . '.sql';
+    header('Content-Type: application/sql');
     if (!file_exists($file)) { http_response_code(500); exit('Backup failed'); }
     header('Content-Disposition: attachment; filename="' . $downloadName . '"');
     header('Content-Length: ' . filesize($file));
@@ -1592,7 +1567,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <button class="act btn-success" onclick="saveLayout('admin_menu')">💾 ذخیره چیدمان</button>
         <button class="act btn-danger" onclick="resetLayout('admin_menu')">↩️ بازگشت به پیش‌فرض</button>
     </div>
-    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس»، «بکاپ سورس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این سه گزینه دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
+    <div class="hint">دکمه‌های 👑 («مدیران»، «تنظیمات پنل وب»، «پنل تنظیمات کامل») فقط برای مدیر کل (ADMIN_ID) نمایش داده می‌شوند، حتی اگر در چیدمان باشند. دکمه‌ی «وضعیت ربات» یک پسوند داینامیک دارد که وضعیت عمومی فعلی را نشان می‌دهد: <b><?= $publicModeOn ? '🟢 روشن' : '🔴 خاموش' ?></b> — همین الان در پیش‌نمایش هم دیده می‌شود.<br>نکته مهم: دکمه‌ی «💾 بک‌آپ» یک زیرمنو باز می‌کند که شامل «بکاپ دیتابیس» و (برای مدیر کل) «ایمپورت بک‌آپ» است؛ به همین دلیل این دو گزینه دیگر در ادیتور بالا قابل چیدمان مستقیم نیستند و فقط از طریق دکمه‌ی «💾 بک‌آپ» در دسترس‌اند (متن/رنگ/ایموجی آن‌ها همچنان از تب‌های مربوطه قابل تغییر است).</div>
 </div>
 
 <div class="menu-section" id="section-sub_menu">
@@ -1907,7 +1882,6 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <h3>💾 بکاپ کامل (دستی)</h3>
         <div class="actions">
             <a class="act btn-primary" href="?api=download_db_backup">💾 دانلود بکاپ دیتابیس (SQL)</a>
-            <a class="act btn-success" href="?api=download_source_backup">📦 دانلود بکاپ سورس (ZIP)</a>
         </div>
         <div class="hint">این فایل‌ها مستقیماً از سرور دانلود می‌شوند و به گروه گزارشات ارسال نمی‌گردند (برای ارسال به گروه از دکمه‌های داخل ربات در تلگرام استفاده کنید). برای بکاپ سریع فقط تنظیمات این پنل (چیدمان/رنگ/قفل کانال/گزارشات/کرون و ...) از تب 🧭 داشبورد استفاده کنید.</div>
         <div class="hint">📥 برای «ایمپورت» بکاپ SQL (رکوردهای جدید اضافه و رکوردهای موجود با مقادیر فایل بک‌آپ بازنویسی می‌شوند — پس فقط از بک‌آپ تازه استفاده کن)، از دکمه «📥 ایمپورت بک‌آپ» که داخل زیرمنوی «💾 بک‌آپ» در منوی «⚙️ پنل مدیریت» داخل خود ربات در تلگرام قرار دارد استفاده کنید — این عملیات (آپلود فایل .sql) از داخل تلگرام انجام می‌شود، نه از این پنل وب.</div>
