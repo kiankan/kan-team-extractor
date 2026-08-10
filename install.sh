@@ -14,6 +14,7 @@
 #         sudo kanbot info           Show install info (domain, panel URL, DB, ...)
 #         sudo kanbot status         Show service status
 #         sudo kanbot restart        Restart all related services
+#         sudo kanbot restore        Restore a previous DB/source backup onto this install
 #         sudo kanbot uninstall      Full removal (asks for confirmation)
 #
 #  Since installs launched via `curl | sudo bash` have no real stdin to read
@@ -96,13 +97,27 @@ usage() {
 Usage:
   sudo bash install.sh install                          Interactive install (asks questions)
   sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--email=E]
+                                [--restore-db=/path/db_backup.sql] [--restore-source=/path/source_backup.zip]
                                                           Unattended install (no questions asked)
   sudo bash install.sh update
   sudo bash install.sh info
   sudo bash install.sh status
   sudo bash install.sh restart
+  sudo bash install.sh restore [--db=/path/db_backup.sql] [--source=/path/source_backup.zip]
   sudo bash install.sh uninstall [--yes]
   sudo bash install.sh menu
+
+Restoring a previous backup during install:
+  --restore-db=PATH      Path (on this server) to a db_backup_*.sql file produced by the
+                          bot's "بکاپ دیتابیس" (Telegram or web panel). Imported right after
+                          the fresh tables are created, so old data is compatible with the
+                          new install's schema.
+  --restore-source=PATH  Path (on this server) to a source_backup_*.zip file produced by the
+                          bot's "بکاپ سورس". Extracted over the freshly deployed files (before
+                          the DB tables are created), config.php is always kept untouched.
+  Both are optional and can be used together or separately. Same flags, without the
+  "restore-" prefix (--db=, --source=), work on the standalone 'restore' command to restore
+  backups onto an already-installed instance.
 
 Remote one-liner (no local files needed) — interactive, asks questions
 one by one just like a local run:
@@ -110,11 +125,13 @@ one by one just like a local run:
 
 Remote one-liner, fully unattended (all answers given up front as flags):
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- install \\
-      --domain=bot.example.com --token=BOT_TOKEN --admin=ADMIN_ID [--email=you@example.com]
+      --domain=bot.example.com --token=BOT_TOKEN --admin=ADMIN_ID [--email=you@example.com] \\
+      [--restore-db=/root/db_backup.sql] [--restore-source=/root/source_backup.zip]
 
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- update
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- info
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- restart
+  curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- restore --db=/root/db_backup.sql --source=/root/source_backup.zip
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- uninstall --yes
 USAGE
 }
@@ -151,6 +168,22 @@ fetch_source() {
 #  Install section
 # ==============================================================================
 
+# Validates a path given for --restore-db/--restore-source (or their prompt
+# equivalents): must exist, be a readable regular file, and non-empty.
+validate_restore_file() {
+    local path="$1" label="$2"
+    [[ -z "$path" ]] && return 0
+    if [[ ! -f "$path" || ! -r "$path" ]]; then
+        err "$label file not found or not readable: $path"
+        return 1
+    fi
+    if [[ ! -s "$path" ]]; then
+        err "$label file is empty: $path"
+        return 1
+    fi
+    return 0
+}
+
 collect_inputs() {
     title "Collecting install information"
     tty_read "Domain already pointed at this server (e.g. bot.example.com): " DOMAIN
@@ -164,12 +197,24 @@ collect_inputs() {
 
     tty_read "Your email for the SSL certificate (Let's Encrypt) [optional, Enter to skip]: " SSL_EMAIL
 
+    tty_read "Path to a previous DB backup (.sql) to restore [optional, Enter to skip]: " RESTORE_DB_FILE
+    while [[ -n "$RESTORE_DB_FILE" ]] && ! validate_restore_file "$RESTORE_DB_FILE" "DB backup"; do
+        tty_read "Path to a previous DB backup (.sql) to restore [optional, Enter to skip]: " RESTORE_DB_FILE
+    done
+
+    tty_read "Path to a previous source backup (.zip) to restore [optional, Enter to skip]: " RESTORE_SOURCE_FILE
+    while [[ -n "$RESTORE_SOURCE_FILE" ]] && ! validate_restore_file "$RESTORE_SOURCE_FILE" "Source backup"; do
+        tty_read "Path to a previous source backup (.zip) to restore [optional, Enter to skip]: " RESTORE_SOURCE_FILE
+    done
+
     finalize_install_vars
     echo
     info "Summary:"
     echo "  Domain:      $DOMAIN"
     echo "  Web root:    $WEBROOT"
     echo "  DB name:     $DB_NAME"
+    [[ -n "$RESTORE_DB_FILE" ]]     && echo "  Restore DB:     $RESTORE_DB_FILE"
+    [[ -n "$RESTORE_SOURCE_FILE" ]] && echo "  Restore source: $RESTORE_SOURCE_FILE"
     tty_read "Does everything look right? Continue? [Y/n]: " CONFIRM
     if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
         err "Installation cancelled."
@@ -178,14 +223,17 @@ collect_inputs() {
 }
 
 # Non-interactive input path: parses --domain= --token= --admin= --email=
+# --restore-db= --restore-source=
 parse_install_args() {
-    DOMAIN=""; BOT_TOKEN=""; ADMIN_ID=""; SSL_EMAIL=""
+    DOMAIN=""; BOT_TOKEN=""; ADMIN_ID=""; SSL_EMAIL=""; RESTORE_DB_FILE=""; RESTORE_SOURCE_FILE=""
     for arg in "$@"; do
         case "$arg" in
-            --domain=*) DOMAIN="${arg#*=}" ;;
-            --token=*)  BOT_TOKEN="${arg#*=}" ;;
-            --admin=*)  ADMIN_ID="${arg#*=}" ;;
-            --email=*)  SSL_EMAIL="${arg#*=}" ;;
+            --domain=*)         DOMAIN="${arg#*=}" ;;
+            --token=*)          BOT_TOKEN="${arg#*=}" ;;
+            --admin=*)          ADMIN_ID="${arg#*=}" ;;
+            --email=*)          SSL_EMAIL="${arg#*=}" ;;
+            --restore-db=*)     RESTORE_DB_FILE="${arg#*=}" ;;
+            --restore-source=*) RESTORE_SOURCE_FILE="${arg#*=}" ;;
             *) warn "Unknown option ignored: $arg" ;;
         esac
     done
@@ -203,9 +251,13 @@ parse_install_args() {
         err "--admin must be numeric only."
         exit 1
     fi
+    validate_restore_file "$RESTORE_DB_FILE" "DB backup" || exit 1
+    validate_restore_file "$RESTORE_SOURCE_FILE" "Source backup" || exit 1
 
     finalize_install_vars
     info "Installing with: domain=$DOMAIN admin=$ADMIN_ID email=${SSL_EMAIL:-<none>}"
+    [[ -n "$RESTORE_DB_FILE" ]]     && info "Will restore DB backup: $RESTORE_DB_FILE"
+    [[ -n "$RESTORE_SOURCE_FILE" ]] && info "Will restore source backup: $RESTORE_SOURCE_FILE"
 }
 
 finalize_install_vars() {
@@ -295,6 +347,30 @@ PHP
     ok "Files copied and config.php created."
 }
 
+# Extracts a previous source_backup_*.zip (as produced by the bot's own
+# "بکاپ سورس" feature) over $WEBROOT. Runs after deploy_files so that any
+# customized code in the backup (e.g. a different table.php) is what actually
+# builds the schema in create_tables right after. config.php is always
+# excluded on extraction — the backup never contains it (createSourceBackupFile
+# skips it on purpose) but this is a defense-in-depth guard regardless, since
+# the freshly generated credentials in $WEBROOT/config.php must survive.
+restore_source_backup() {
+    [[ -z "${RESTORE_SOURCE_FILE:-}" ]] && return 0
+    title "Restoring previous source backup"
+    if ! command -v unzip >/dev/null 2>&1; then
+        err "unzip is not available; cannot restore source backup."
+        exit 1
+    fi
+    if ! unzip -o -q "$RESTORE_SOURCE_FILE" -d "$WEBROOT" -x 'config.php' >/tmp/teamkan_restore_source.log 2>&1; then
+        err "Failed to extract source backup. Details: /tmp/teamkan_restore_source.log"
+        exit 1
+    fi
+    chown -R www-data:www-data "$WEBROOT"
+    find "$WEBROOT" -type d -exec chmod 750 {} \;
+    find "$WEBROOT" -type f -exec chmod 640 {} \;
+    ok "Source backup restored from: $RESTORE_SOURCE_FILE"
+}
+
 create_tables() {
     title "Creating database tables"
     php "$WEBROOT/table.php" >/tmp/teamkan_tables.log 2>&1
@@ -303,6 +379,29 @@ create_tables() {
         exit 1
     fi
     ok "Database tables created."
+}
+
+# Imports a previous db_backup_*.sql (as produced by the bot's own "بکاپ
+# دیتابیس" feature) into the freshly created tables. The dump only ever
+# contains SET NAMES/SET FOREIGN_KEY_CHECKS and per-row `INSERT IGNORE INTO`
+# statements naming their columns explicitly (see createDbBackupFile() in
+# bot.php/webpanel.php) — no DROP/CREATE/ALTER — so it is always safe to run
+# directly against the new schema. --force keeps mysql going past any single
+# failed row (e.g. a column dropped since the backup was taken) instead of
+# aborting the whole restore, so older backups stay compatible with newer
+# installs.
+restore_db_backup() {
+    [[ -z "${RESTORE_DB_FILE:-}" ]] && return 0
+    title "Restoring previous database backup"
+    local log="/tmp/teamkan_restore_db.log"
+    mysql --force -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "$RESTORE_DB_FILE" 2>"$log"
+    local failed_rows
+    failed_rows="$(grep -c '^ERROR' "$log" 2>/dev/null || true)"
+    if [[ "${failed_rows:-0}" -gt 0 ]]; then
+        warn "DB backup restored with $failed_rows row(s) skipped (schema differences). Details: $log"
+    else
+        ok "DB backup restored from: $RESTORE_DB_FILE"
+    fi
 }
 
 setup_nginx() {
@@ -397,7 +496,9 @@ do_install_steps() {
     setup_database
     fetch_source
     deploy_files
+    restore_source_backup
     create_tables
+    restore_db_backup
     setup_nginx
     setup_ssl
     set_webhook
@@ -411,6 +512,8 @@ do_install_steps() {
     echo -e "${C_GREEN}Managing it later:${C_RESET} run ${C_BOLD}sudo kanbot${C_RESET} to open the management menu,"
     echo -e "            or ${C_BOLD}sudo kanbot update|info|status|restart|uninstall${C_RESET} directly."
     echo -e "${C_GREEN}Install info saved to:${C_RESET} $CONF_FILE"
+    [[ -n "${RESTORE_DB_FILE:-}" || -n "${RESTORE_SOURCE_FILE:-}" ]] && \
+        echo -e "${C_GREEN}Restored from backup:${C_RESET} ${RESTORE_DB_FILE:-<no db>}  ${RESTORE_SOURCE_FILE:-<no source>}"
 }
 
 run_install() {
@@ -485,6 +588,41 @@ mgmt_backup() {
     else
         err "Backup failed. Details: /tmp/teamkan_backup.log"
     fi
+}
+
+# Restores a previous DB and/or source backup onto this already-installed
+# instance, using the same restore_db_backup()/restore_source_backup() logic
+# as a fresh install. Accepts --db=PATH / --source=PATH; falls back to
+# interactive prompts when called with no flags (e.g. from the menu).
+mgmt_restore() {
+    RESTORE_DB_FILE=""; RESTORE_SOURCE_FILE=""
+    for arg in "$@"; do
+        case "$arg" in
+            --db=*)     RESTORE_DB_FILE="${arg#*=}" ;;
+            --source=*) RESTORE_SOURCE_FILE="${arg#*=}" ;;
+            *) warn "Unknown option ignored: $arg" ;;
+        esac
+    done
+
+    if [[ $# -eq 0 ]]; then
+        tty_read "Path to a DB backup (.sql) to restore [optional, Enter to skip]: " RESTORE_DB_FILE
+        tty_read "Path to a source backup (.zip) to restore [optional, Enter to skip]: " RESTORE_SOURCE_FILE
+    fi
+
+    if [[ -z "$RESTORE_DB_FILE" && -z "$RESTORE_SOURCE_FILE" ]]; then
+        warn "Nothing to restore (no --db or --source given)."
+        return
+    fi
+
+    validate_restore_file "$RESTORE_DB_FILE" "DB backup" || return
+    validate_restore_file "$RESTORE_SOURCE_FILE" "Source backup" || return
+
+    title "Restoring backup onto existing install"
+    warn "This overwrites current files (source restore) and/or upserts current DB rows (db restore)."
+    restore_source_backup
+    restore_db_backup
+    mgmt_restart_bot
+    ok "Restore complete."
 }
 
 mgmt_rewebhook() {
@@ -591,10 +729,11 @@ show_menu() {
         echo " 4) Update bot (pull latest from GitHub)"
         echo " 5) Show install info"
         echo " 6) Manual database backup"
-        echo " 7) Reset Telegram webhook"
-        echo " 8) Reset panel password"
-        echo " 9) Renew/get SSL certificate"
-        echo "10) Full uninstall"
+        echo " 7) Restore from a previous backup (DB and/or source)"
+        echo " 8) Reset Telegram webhook"
+        echo " 9) Reset panel password"
+        echo "10) Renew/get SSL certificate"
+        echo "11) Full uninstall"
         echo " 0) Exit"
         read -rp "Choose an option: " CH
         case "$CH" in
@@ -604,10 +743,11 @@ show_menu() {
             4) mgmt_update_bot ;;
             5) mgmt_info ;;
             6) mgmt_backup ;;
-            7) mgmt_rewebhook ;;
-            8) mgmt_reset_panel_password ;;
-            9) mgmt_ssl_renew ;;
-            10) mgmt_uninstall ;;
+            7) mgmt_restore ;;
+            8) mgmt_rewebhook ;;
+            9) mgmt_reset_panel_password ;;
+            10) mgmt_ssl_renew ;;
+            11) mgmt_uninstall ;;
             0) exit 0 ;;
             *) warn "Invalid option." ;;
         esac
@@ -637,6 +777,9 @@ main() {
             ;;
         restart)
             require_root; load_conf; mgmt_restart_all
+            ;;
+        restore)
+            require_root; load_conf; mgmt_restore "$@"
             ;;
         uninstall)
             require_root; load_conf; mgmt_uninstall "${1:-}"
