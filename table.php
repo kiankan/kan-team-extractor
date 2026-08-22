@@ -54,7 +54,8 @@ try {
         `used_bytes` DOUBLE DEFAULT 0,
         `expire_ts` BIGINT DEFAULT 0,
         `configs_json` LONGTEXT,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        KEY `idx_created_at` (`created_at`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
     // لاگ ایمپورت‌های بک‌آپ (برای پیگیری تاریخچه‌ی بازیابی‌های انجام‌شده توسط مدیر کل)
@@ -81,6 +82,14 @@ try {
         if (!$check) {
             $pdo->exec("ALTER TABLE `users` ADD COLUMN `$col` $definition;");
         }
+    }
+
+    // ارتقای دیتابیس‌های قدیمی: extractions که قبل از اضافه‌شدن ایندکس ساخته شده
+    // بودن، purgeExpiredExtractions() (که روی هر استخراج جدید صدا زده می‌شه) روی
+    // created_at بدون ایندکس فول‌تیبل‌اسکن می‌زد؛ اینجا ایندکس رو براشون اضافه می‌کنیم
+    $idxCheck = $pdo->query("SHOW INDEX FROM `extractions` WHERE Key_name = 'idx_created_at'")->fetch();
+    if (!$idxCheck) {
+        $pdo->exec("ALTER TABLE `extractions` ADD INDEX `idx_created_at` (`created_at`);");
     }
 
     // جدول قدیمی و غیراستفاده «panels» دیگر توسط ربات یا پنل وب خوانده نمی‌شود؛
