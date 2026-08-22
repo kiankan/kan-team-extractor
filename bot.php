@@ -949,14 +949,62 @@ function splitSqlStatements(string $sql): array {
     return $statements;
 }
 
-// جدا کردن مقادیر یک ردیف VALUES (...) بر اساس کاما، با نادیده گرفتن کاماهایی
-// که داخل رشته‌های تک/دابل‌کوت هستند (همون منطق splitSqlStatements ولی برای کاما)
-function splitSqlValueTuple(string $s): array {
-    $s = trim($s);
-    if (strlen($s) >= 2 && $s[0] === '(' && substr($s, -1) === ')') {
-        $s = substr($s, 1, -1);
+// یه بخشِ VALUES می‌تونه چند تا ردیف پشت‌سرهم داشته باشه: (1,2),(3,4),... (رایج
+// توی mysqldump). این تابع هر تاپلِ (...) رو با رعایت سطح پرانتز و رشته‌های
+// تک/دابل‌کوت جدا می‌کنه و محتوای داخلِ هرکدوم (بدون پرانتز بیرونی) رو برمی‌گردونه؛
+// بدون این کار splitSqlValueTuple ساده روی کل رشته، کاماهای بینِ دو ردیف رو هم مثل
+// کاماهای بین دو ستون می‌شمرد و ردیف‌ها رو با هم قاطی می‌کرد.
+function splitSqlValueTuples(string $s): array {
+    $tuples    = [];
+    $current   = '';
+    $len       = strlen($s);
+    $depth     = 0;
+    $inString  = false;
+    $quoteChar = '';
+
+    for ($i = 0; $i < $len; $i++) {
+        $char = $s[$i];
+
+        if ($inString) {
+            $current .= $char;
+            if ($char === '\\') {
+                if ($i + 1 < $len) { $current .= $s[++$i]; }
+                continue;
+            }
+            if ($char === $quoteChar) { $inString = false; }
+            continue;
+        }
+
+        if ($char === "'" || $char === '"') {
+            $inString  = true;
+            $quoteChar = $char;
+            $current  .= $char;
+            continue;
+        }
+
+        if ($char === '(') {
+            $depth++;
+            if ($depth === 1) { $current = ''; continue; } // پرانتز بازِ خودِ تاپل، نگه‌داشته نمی‌شه
+            $current .= $char;
+            continue;
+        }
+        if ($char === ')') {
+            $depth--;
+            if ($depth === 0) { $tuples[] = $current; $current = ''; continue; } // پایان یک تاپل
+            $current .= $char;
+            continue;
+        }
+
+        if ($depth === 0) continue; // ویرگول/فاصله‌ی بینِ دو تاپل، نه بینِ دو مقدار
+        $current .= $char;
     }
 
+    return $tuples;
+}
+
+// جدا کردن مقادیر یک ردیف (بدون پرانتزِ بیرونی، خروجیِ splitSqlValueTuples) بر اساس
+// کاما، با نادیده گرفتن کاماهایی که داخل رشته‌های تک/دابل‌کوت هستند
+function splitSqlValueTuple(string $s): array {
     $values    = [];
     $current   = '';
     $len       = strlen($s);
@@ -1047,12 +1095,9 @@ function importDbBackupFile($pdo, string $sqlContent): array {
                 continue; // جدول ناشناخته/غیرمجاز برای امنیت رد می‌شود
             }
 
-            $result['total']++;
-
             $cols = array_map(static function ($c) {
                 return trim($c, " `\t\n\r\0\x0B");
             }, explode(',', $m[3]));
-            $rawValues = splitSqlValueTuple($m[4]);
 
             // ستون‌هایی که واقعاً وجود دارند تشخیص داده می‌شوند تا با اسکیمای فعلی این نصب هم سازگار بماند
             // (فقط یک‌بار به‌ازای هر جدول؛ نتیجه‌ش کش می‌شه، نه هر ردیف)
@@ -1065,37 +1110,44 @@ function importDbBackupFile($pdo, string $sqlContent): array {
             }
             $existingCols = $columnsCache[$table] ?? $cols;
 
-            // ستون‌هایی که توی بک‌آپ بودن ولی دیگه توی اسکیمای فعلی وجود ندارن، هم از لیست
-            // ستون‌ها و هم از مقادیرشون حذف می‌شن — تا کل ردیف fail نشه، فقط همون ستون رد بشه
-            $keptCols   = [];
-            $keptValues = [];
-            foreach ($cols as $idx => $c) {
-                if ($c === '' || !in_array($c, $existingCols, true)) continue;
-                $keptCols[]   = $c;
-                $keptValues[] = $rawValues[$idx] ?? 'NULL';
-            }
+            // یک VALUES می‌تونه چند ردیف پشت‌سرهم داشته باشه: (1,2),(3,4),... (رایج توی
+            // mysqldump)؛ هرکدوم رو جدا به‌عنوان یک ردیف مستقل insert/update می‌کنیم.
+            foreach (splitSqlValueTuples($m[4]) as $tupleInner) {
+                $result['total']++;
+                $rawValues = splitSqlValueTuple($tupleInner);
 
-            if (empty($keptCols)) {
-                $result['failed']++;
-                continue; // هیچ ستون معتبری باقی نموند
-            }
+                // ستون‌هایی که توی بک‌آپ بودن ولی دیگه توی اسکیمای فعلی وجود ندارن، هم از لیست
+                // ستون‌ها و هم از مقادیرشون حذف می‌شن — تا کل ردیف fail نشه، فقط همون ستون رد بشه
+                $keptCols   = [];
+                $keptValues = [];
+                foreach ($cols as $idx => $c) {
+                    if ($c === '' || !in_array($c, $existingCols, true)) continue;
+                    $keptCols[]   = $c;
+                    $keptValues[] = $rawValues[$idx] ?? 'NULL';
+                }
 
-            $updateParts = array_map(static function ($c) {
-                return "`$c` = VALUES(`$c`)";
-            }, $keptCols);
+                if (empty($keptCols)) {
+                    $result['failed']++;
+                    continue; // هیچ ستون معتبری باقی نموند
+                }
 
-            $safeStmt = "INSERT INTO `$table` (`" . implode('`, `', $keptCols) . "`) VALUES ("
-                . implode(', ', $keptValues) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $updateParts);
+                $updateParts = array_map(static function ($c) {
+                    return "`$c` = VALUES(`$c`)";
+                }, $keptCols);
 
-            try {
-                // در MySQL/MariaDB خروجی exec برای «INSERT ... ON DUPLICATE KEY UPDATE» این‌طور است:
-                // 1 = رکورد کاملاً جدید درج شد | 2 = رکورد از قبل بود و مقادیرش بروزرسانی شد | 0 = از قبل بود و چیزی تغییر نکرد
-                $affected = $pdo->exec($safeStmt);
-                if ($affected === 1)      $result['inserted']++;
-                elseif ($affected === 2)  $result['updated']++;
-                else                      $result['unchanged']++;
-            } catch (\Throwable $e) {
-                $result['failed']++;
+                $safeStmt = "INSERT INTO `$table` (`" . implode('`, `', $keptCols) . "`) VALUES ("
+                    . implode(', ', $keptValues) . ') ON DUPLICATE KEY UPDATE ' . implode(', ', $updateParts);
+
+                try {
+                    // در MySQL/MariaDB خروجی exec برای «INSERT ... ON DUPLICATE KEY UPDATE» این‌طور است:
+                    // 1 = رکورد کاملاً جدید درج شد | 2 = رکورد از قبل بود و مقادیرش بروزرسانی شد | 0 = از قبل بود و چیزی تغییر نکرد
+                    $affected = $pdo->exec($safeStmt);
+                    if ($affected === 1)      $result['inserted']++;
+                    elseif ($affected === 2)  $result['updated']++;
+                    else                      $result['unchanged']++;
+                } catch (\Throwable $e) {
+                    $result['failed']++;
+                }
             }
             continue;
         }
@@ -2099,22 +2151,28 @@ if ($isCronRequest) {
 
         $captionBase = "🔄 <b>بکاپ خودکار سیستم (کرون‌جاب)</b>\n🕒 زمان: " . jdate('Y/m/d H:i:s');
 
-        if ($dbFile && file_exists($dbFile)) {
-            $caption = "💾 " . $captionBase;
-            sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $dbFile);
+        // این بلوک قبلاً try/catch نداشت؛ اگه sendTopicReport یا ارسال به ادمین (که
+        // خودشون چند تا کوئری دیتابیس می‌زنن) خطا می‌داد، فایل بکاپِ حاوی هش رمز پنل
+        // وب توی temp سرور جا می‌موند و unlink نمی‌شد. حالا با finally همیشه پاک می‌شه.
+        try {
+            if ($dbFile && file_exists($dbFile)) {
+                $caption = "💾 " . $captionBase;
+                sendTopicReport($pdo, $caption, 'بکاپ سیستم 📦', 'report_backup_thread_id', $dbFile);
 
-            if (defined('ADMIN_ID')) {
-                $caption = applyPremiumToText($caption);
-                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($dbFile)), 'caption' => $caption, 'parse_mode' => 'HTML'],
-                    CURLOPT_TIMEOUT => 30
-                ]);
-                curl_exec($ch); curl_close($ch);
+                if (defined('ADMIN_ID')) {
+                    $caption = applyPremiumToText($caption);
+                    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => ['chat_id' => ADMIN_ID, 'document' => new CURLFile(realpath($dbFile)), 'caption' => $caption, 'parse_mode' => 'HTML'],
+                        CURLOPT_TIMEOUT => 30
+                    ]);
+                    curl_exec($ch); curl_close($ch);
+                }
             }
-            unlink($dbFile);
+        } finally {
+            if ($dbFile && file_exists($dbFile)) unlink($dbFile);
         }
 
         echo json_encode(["status" => "success", "message" => "Backup executed and sent successfully."]);
@@ -2789,6 +2847,7 @@ try {
         if (str_starts_with($data, 'set_cron_')) {
             if (!$isAdmin) exit;
             $val = str_replace('set_cron_', '', $data);
+            if (!preg_match('/^\d+$/', $val)) exit;
             setSetting($pdo, 'cron_interval', $val);
             answerCallback($callbackId, "✅ زمان کرون تغییر کرد.", true);
             
@@ -2816,18 +2875,22 @@ try {
             $file = createDbBackupFile($pdo);
 
             if ($file && file_exists($file)) {
-                $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
+                // با finally تا اگه ارسال به ادمین/گزارش با خطا مواجه شد (مثلاً قطعی
+                // موقت دیتابیس)، فایل بکاپ حاوی هش رمز پنل وب توی temp جا نمونه.
+                try {
+                    $caption = "💾 <b>بکاپ دستی دیتابیس</b>";
 
-                $adminCaption = applyPremiumToText($caption);
-                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
-                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'document' => new CURLFile(realpath($file)), 'caption' => $adminCaption, 'parse_mode' => 'HTML'],
-                    CURLOPT_TIMEOUT => 30]);
-                curl_exec($ch); curl_close($ch);
-                
-                sendTopicReport($pdo, $caption . "\n👤 تهیه شده توسط: <code>{$chatId}</code>\n🕒 زمان: " . jdate('Y/m/d H:i:s'), 'بکاپ سیستم 📦', 'report_backup_thread_id', $file);
-                
-                unlink($file);
+                    $adminCaption = applyPremiumToText($caption);
+                    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
+                    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'document' => new CURLFile(realpath($file)), 'caption' => $adminCaption, 'parse_mode' => 'HTML'],
+                        CURLOPT_TIMEOUT => 30]);
+                    curl_exec($ch); curl_close($ch);
+
+                    sendTopicReport($pdo, $caption . "\n👤 تهیه شده توسط: <code>{$chatId}</code>\n🕒 زمان: " . jdate('Y/m/d H:i:s'), 'بکاپ سیستم 📦', 'report_backup_thread_id', $file);
+                } finally {
+                    unlink($file);
+                }
             } else {
                 sendMessage($chatId, "❌ خطا در ساخت بکاپ.");
             }
