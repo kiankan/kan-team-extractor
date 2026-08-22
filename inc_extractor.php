@@ -206,66 +206,94 @@ class AdvancedSubExtractor {
             $block = trim($block);
             if ($block === '' || !preg_match('/^(?:#[^\n]*\n\s*)*\[Interface\]/i', $block)) continue;
 
-            $section  = '';
-            $iface    = [];
-            $peers    = [];
-            $peer     = [];
-            $comments = [];
+            // بعضی پنل‌ها زیر یک [Interface] چند تا [Peer] (چند سرور/اندپوینت مجزا)
+            // می‌ذارن؛ هرکدوم یعنی یه گزینه‌ی اتصال کاملاً مستقله (دقیقاً مثل چند
+            // لینک vless جدا)، نه یک تونل چندنقطه‌ای. برای همین هر [Peer] رو
+            // به‌عنوان یک کانفیگ کاملاً جدا (با همون یک [Interface] مشترک) برمی‌گردونیم
+            // تا هیچ‌کدوم زیر سایه‌ی اولی گم نشه.
+            $section          = '';
+            $ifaceLines       = [];
+            $peers            = [];
+            $currentPeerLines = [];
+            $pendingComments  = [];
+            $peerLabel        = '';
+            $blockLabel       = '';
+            $sawInterfaceHdr  = false;
 
             foreach (explode("\n", $block) as $line) {
-                $line = trim($line);
-                if ($line === '') continue;
+                $trimmedLine = trim($line);
+                if ($trimmedLine === '') continue;
 
-                if (preg_match('/^#+\s*(.+)$/', $line, $cm)) {
-                    $comments[] = trim($cm[1]);
+                if (preg_match('/^#+\s*(.+)$/', $trimmedLine, $cm)) {
+                    $pendingComments[] = trim($cm[1]);
                     continue;
                 }
-                if (preg_match('/^\[(Interface|Peer)\]$/i', $line, $sm)) {
-                    if (strcasecmp($section, 'Peer') === 0 && !empty($peer)) {
-                        $peers[] = $peer;
-                        $peer = [];
+                if (preg_match('/^\[(Interface|Peer)\]$/i', $trimmedLine, $sm)) {
+                    $newSection = strtolower($sm[1]);
+                    if ($newSection === 'peer') {
+                        if (!empty($currentPeerLines)) {
+                            $peers[] = ['lines' => $currentPeerLines, 'label' => $peerLabel];
+                        }
+                        $currentPeerLines = [$line];
+                        $peerLabel = '';
+                        foreach ($pendingComments as $c) { if ($c !== '') { $peerLabel = $c; break; } }
+                    } else {
+                        if (!$sawInterfaceHdr) {
+                            foreach ($pendingComments as $c) { if ($c !== '') { $blockLabel = $c; break; } }
+                            $sawInterfaceHdr = true;
+                        }
+                        $ifaceLines[] = $line;
                     }
-                    $section = strtolower($sm[1]);
+                    $pendingComments = [];
+                    $section = $newSection;
                     continue;
                 }
-                if (strpos($line, '=') === false) continue;
-
-                [$key, $val] = array_map('trim', explode('=', $line, 2));
-                $key = strtolower($key);
 
                 if ($section === 'interface') {
-                    $iface[$key] = $val;
+                    $ifaceLines[] = $line;
                 } elseif ($section === 'peer') {
-                    $peer[$key] = $val;
+                    $currentPeerLines[] = $line;
                 }
+                $pendingComments = [];
             }
-            if (!empty($peer)) $peers[] = $peer;
-
-            if (empty($iface) || empty($peers)) continue;
-
-            $server = '';
-            $port   = '';
-            $endpoint = $peers[0]['endpoint'] ?? '';
-            if ($endpoint !== '' && preg_match('/^(\[[^\]]+\]|[^:\s]+):(\d{1,5})$/', $endpoint, $em)) {
-                $server = trim($em[1], '[]');
-                $port   = $em[2];
+            if (!empty($currentPeerLines)) {
+                $peers[] = ['lines' => $currentPeerLines, 'label' => $peerLabel];
             }
 
-            $name = '';
-            foreach ($comments as $c) {
-                if ($c !== '') { $name = $c; break; }
-            }
-            if ($name === '') {
-                $name = $server !== '' ? $server : 'WireGuard Config';
-            }
+            if (empty($ifaceLines) || empty($peers)) continue;
 
-            $configs[] = [
-                'name'     => $name,
-                'protocol' => 'WIREGUARD',
-                'raw'      => $block,
-                'server'   => $server,
-                'port'     => $port,
-            ];
+            $ifaceText = implode("\n", $ifaceLines);
+            $multiPeer = count($peers) > 1;
+
+            foreach ($peers as $idx => $peer) {
+                $peerText = implode("\n", $peer['lines']);
+
+                $server = '';
+                $port   = '';
+                if (preg_match('/^\s*Endpoint\s*=\s*(.+?)\s*$/mi', $peerText, $em)) {
+                    $endpoint = $em[1];
+                    if (preg_match('/^(\[[^\]]+\]|[^:\s]+):(\d{1,5})$/', $endpoint, $sm)) {
+                        $server = trim($sm[1], '[]');
+                        $port   = $sm[2];
+                    }
+                }
+
+                if ($peer['label'] !== '') {
+                    $name = $peer['label'];
+                } elseif ($blockLabel !== '') {
+                    $name = $multiPeer ? ($blockLabel . ' #' . ($idx + 1)) : $blockLabel;
+                } else {
+                    $name = $server !== '' ? $server : 'WireGuard Config';
+                }
+
+                $configs[] = [
+                    'name'     => $name,
+                    'protocol' => 'WIREGUARD',
+                    'raw'      => $ifaceText . "\n\n" . $peerText,
+                    'server'   => $server,
+                    'port'     => $port,
+                ];
+            }
         }
         return $configs;
     }
