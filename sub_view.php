@@ -594,6 +594,21 @@ function downloadAllConfigs() {
     showToast('⬇️ فایل کانفیگ‌ها دانلود شد.');
 }
 
+// وایرگارد برخلاف بقیه پروتکل‌ها یه لینک تکی نیست، خودِ متنش یک فایل .conf کامل و
+// مستقله؛ برای همین به‌جای اضافه‌شدن به فایل ترکیبی .txt بالا، هر کانفیگ وایرگارد
+// جدا و با پسوند .conf دانلود می‌شه تا مستقیم قابل ایمپورت توی اپ وایرگارد باشه.
+function downloadConfigFile(raw, name) {
+    if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+    const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
+    const blob = new Blob([raw], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = safeName + '.conf';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast('⬇️ فایل کانفیگ دانلود شد.');
+}
+
 function filterByProtocol(proto) {
     const box = document.getElementById('configSearch');
     box.value = proto;
@@ -763,6 +778,17 @@ function renderConfigList(filterText) {
 
         actions.appendChild(copyBtn);
         actions.appendChild(qrBtn);
+
+        if ((c.protocol || '').toLowerCase() === 'wireguard') {
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'ci-btn';
+            dlBtn.textContent = '⬇️ دانلود';
+            dlBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                downloadConfigFile(c.raw || '', c.name || 'wireguard');
+            });
+            actions.appendChild(dlBtn);
+        }
 
         item.appendChild(flagEl);
         item.appendChild(info);
@@ -1229,6 +1255,13 @@ function renderConfigList(filterText){
     qrBtn.addEventListener('click', () => showConfigQR(c.raw || '', c.name || c.protocol || 'config'));
 
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
+
+    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = 'dl';
+      dlBtn.addEventListener('click', () => downloadConfigFile(c.raw || '', c.name || 'wireguard'));
+      actions.appendChild(dlBtn);
+    }
     row.appendChild(perm); row.appendChild(name); row.appendChild(proto); row.appendChild(actions);
     fragment.appendChild(row);
   });
@@ -1248,6 +1281,15 @@ function downloadAllConfigs(){
   const blob = new Blob([text], { type:'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'configs.txt';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  showToast('$ ok: file downloaded');
+}
+function downloadConfigFile(raw, name){
+  if (!raw) { showToast('$ error: nothing to download'); return; }
+  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
+  const blob = new Blob([raw], { type:'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = safeName + '.conf';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   showToast('$ ok: file downloaded');
 }
@@ -1670,6 +1712,13 @@ function renderConfigList(filterText){
     qrBtn.addEventListener('click', () => showConfigQR(c.raw || '', c.name || c.protocol || 'Config'));
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
 
+    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = '⬇️';
+      dlBtn.addEventListener('click', () => downloadConfigFile(c.raw || '', c.name || 'wireguard'));
+      actions.appendChild(dlBtn);
+    }
+
     row.appendChild(left); row.appendChild(actions);
     fragment.appendChild(row);
   });
@@ -1689,6 +1738,15 @@ function downloadAllConfigs(){
   const blob = new Blob([text], { type:'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'configs.txt';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  showToast('⬇️ فایل دانلود شد.');
+}
+function downloadConfigFile(raw, name){
+  if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
+  const blob = new Blob([raw], { type:'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = safeName + '.conf';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   showToast('⬇️ فایل دانلود شد.');
 }
@@ -2381,6 +2439,16 @@ function renderConfigList(filterText) {
     });
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
 
+    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'ci-btn'; dlBtn.textContent = '⬇️ دانلود';
+      dlBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadConfigFile(c.raw || '', c.name || 'wireguard');
+      });
+      actions.appendChild(dlBtn);
+    }
+
     item.appendChild(flagEl); item.appendChild(info); item.appendChild(actions);
     fragment.appendChild(item);
   });
@@ -2405,6 +2473,17 @@ function downloadAllConfigs() {
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
   showToast('⬇️ فایل کانفیگ‌ها دانلود شد.');
+}
+function downloadConfigFile(raw, name) {
+  if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
+  const blob = new Blob([raw], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = safeName + '.conf';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('⬇️ فایل کانفیگ دانلود شد.');
 }
 
 // ---------------- مودال QR تکی ----------------
