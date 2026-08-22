@@ -166,6 +166,39 @@ $isActive = !$expiredByTime && !$expiredByVolume;
 $configs = json_decode($row['configs_json'] ?? '[]', true);
 if (!is_array($configs)) $configs = [];
 
+// دانلود سمت سرورِ یک کانفیگ وایرگارد به‌عنوان فایل .conf واقعی (با هدر
+// Content-Disposition). دکمه‌ی «دانلود» توی هر ۴ تم به همین آدرس ریدایرکت
+// می‌شه؛ چون دانلود سمت کلاینت (Blob + <a download>) توی وب‌ویوهای محدود
+// (مثلاً مرورگر داخلی تلگرام) به‌جای دانلود واقعی، فقط متن خام رو نشون می‌داد.
+if (isset($_GET['dl_conf'])) {
+    $idx = (int)$_GET['dl_conf'];
+    $cfg = $configs[$idx] ?? null;
+    if (!is_array($cfg) || strtolower((string)($cfg['protocol'] ?? '')) !== 'wireguard') {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit('کانفیگ یافت نشد.');
+    }
+
+    $raw  = (string)($cfg['raw'] ?? '');
+    $name = (string)($cfg['name'] ?? 'wireguard');
+
+    $utf8Name = preg_replace('/[\/\\\\:\*\?"<>\|\x00-\x1F]+/u', '_', $name);
+    $utf8Name = trim((string)$utf8Name, " ._");
+    if ($utf8Name === '') $utf8Name = 'wireguard';
+    $utf8Name = mb_substr($utf8Name, 0, 60, 'UTF-8');
+
+    $asciiName = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $utf8Name);
+    $asciiName = trim((string)$asciiName, '_');
+    if ($asciiName === '') $asciiName = 'wireguard';
+
+    header('Content-Type: application/octet-stream');
+    header('Content-Length: ' . strlen($raw));
+    header('Content-Disposition: attachment; filename="' . $asciiName . '.conf"; filename*=UTF-8\'\'' . rawurlencode($utf8Name) . '.conf');
+    header('X-Content-Type-Options: nosniff');
+    echo $raw;
+    exit;
+}
+
 $protocolCounts = [];
 $firstVless = null;
 foreach ($configs as $c) {
@@ -596,17 +629,13 @@ function downloadAllConfigs() {
 
 // وایرگارد برخلاف بقیه پروتکل‌ها یه لینک تکی نیست، خودِ متنش یک فایل .conf کامل و
 // مستقله؛ برای همین به‌جای اضافه‌شدن به فایل ترکیبی .txt بالا، هر کانفیگ وایرگارد
-// جدا و با پسوند .conf دانلود می‌شه تا مستقیم قابل ایمپورت توی اپ وایرگارد باشه.
-function downloadConfigFile(raw, name) {
-    if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
-    const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
-    const blob = new Blob([raw], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = safeName + '.conf';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    showToast('⬇️ فایل کانفیگ دانلود شد.');
+// جدا دانلود می‌شه. دانلود از سمت سرور (ریدایرکت به sub_view.php?dl_conf=) انجام
+// می‌شه، نه با Blob سمت کلاینت، چون توی وب‌ویوهای محدود (مثل مرورگر داخلی تلگرام)
+// دانلود Blob کار نمی‌کرد و به‌جاش متن خام رو نشون می‌داد.
+function downloadConfigFile(c) {
+    const idx = CONFIGS.indexOf(c);
+    if (idx === -1) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+    window.location.href = 'sub_view.php?id=' + encodeURIComponent(TOKEN) + '&dl_conf=' + idx;
 }
 
 function filterByProtocol(proto) {
@@ -785,7 +814,7 @@ function renderConfigList(filterText) {
             dlBtn.textContent = '⬇️ دانلود';
             dlBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                downloadConfigFile(c.raw || '', c.name || 'wireguard');
+                downloadConfigFile(c);
             });
             actions.appendChild(dlBtn);
         }
@@ -1259,7 +1288,7 @@ function renderConfigList(filterText){
     if ((c.protocol || '').toLowerCase() === 'wireguard') {
       const dlBtn = document.createElement('button');
       dlBtn.textContent = 'dl';
-      dlBtn.addEventListener('click', () => downloadConfigFile(c.raw || '', c.name || 'wireguard'));
+      dlBtn.addEventListener('click', () => downloadConfigFile(c));
       actions.appendChild(dlBtn);
     }
     row.appendChild(perm); row.appendChild(name); row.appendChild(proto); row.appendChild(actions);
@@ -1284,14 +1313,10 @@ function downloadAllConfigs(){
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   showToast('$ ok: file downloaded');
 }
-function downloadConfigFile(raw, name){
-  if (!raw) { showToast('$ error: nothing to download'); return; }
-  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
-  const blob = new Blob([raw], { type:'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = safeName + '.conf';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  showToast('$ ok: file downloaded');
+function downloadConfigFile(c){
+  const idx = CONFIGS.indexOf(c);
+  if (idx === -1) { showToast('$ error: nothing to download'); return; }
+  window.location.href = 'sub_view.php?id=' + encodeURIComponent(TOKEN) + '&dl_conf=' + idx;
 }
 function showConfigQR(raw, name){
   if (!raw) { showToast('$ error: nothing to encode'); return; }
@@ -1715,7 +1740,7 @@ function renderConfigList(filterText){
     if ((c.protocol || '').toLowerCase() === 'wireguard') {
       const dlBtn = document.createElement('button');
       dlBtn.textContent = '⬇️';
-      dlBtn.addEventListener('click', () => downloadConfigFile(c.raw || '', c.name || 'wireguard'));
+      dlBtn.addEventListener('click', () => downloadConfigFile(c));
       actions.appendChild(dlBtn);
     }
 
@@ -1741,14 +1766,10 @@ function downloadAllConfigs(){
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   showToast('⬇️ فایل دانلود شد.');
 }
-function downloadConfigFile(raw, name){
-  if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
-  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
-  const blob = new Blob([raw], { type:'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = safeName + '.conf';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  showToast('⬇️ فایل دانلود شد.');
+function downloadConfigFile(c){
+  const idx = CONFIGS.indexOf(c);
+  if (idx === -1) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+  window.location.href = 'sub_view.php?id=' + encodeURIComponent(TOKEN) + '&dl_conf=' + idx;
 }
 function showConfigQR(raw, name){
   if (!raw) { showToast('❌ این کانفیگ QR ندارد.'); return; }
@@ -2444,7 +2465,7 @@ function renderConfigList(filterText) {
       dlBtn.className = 'ci-btn'; dlBtn.textContent = '⬇️ دانلود';
       dlBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        downloadConfigFile(c.raw || '', c.name || 'wireguard');
+        downloadConfigFile(c);
       });
       actions.appendChild(dlBtn);
     }
@@ -2474,16 +2495,10 @@ function downloadAllConfigs() {
   URL.revokeObjectURL(url);
   showToast('⬇️ فایل کانفیگ‌ها دانلود شد.');
 }
-function downloadConfigFile(raw, name) {
-  if (!raw) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
-  const safeName = (name || 'wireguard').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'wireguard';
-  const blob = new Blob([raw], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = safeName + '.conf';
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-  showToast('⬇️ فایل کانفیگ دانلود شد.');
+function downloadConfigFile(c) {
+  const idx = CONFIGS.indexOf(c);
+  if (idx === -1) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+  window.location.href = 'sub_view.php?id=' + encodeURIComponent(TOKEN) + '&dl_conf=' + idx;
 }
 
 // ---------------- مودال QR تکی ----------------

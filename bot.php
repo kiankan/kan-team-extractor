@@ -1439,11 +1439,14 @@ function editMessageText($chatId, int $messageId, string $text, ?array $replyMar
 // مفیدن، متن خام کانفیگ وایرگارد یه فایل .conf کامله؛ برای همین به‌جای فرستادن
 // توی <code>، به‌عنوان attachment واقعی (sendDocument) با پسوند .conf ارسال می‌شه
 // تا مستقیم توی اپ وایرگارد قابل ایمپورت باشه.
-function sendConfigFile($chatId, string $baseName, string $content, string $caption = ''): void {
-    $safeName = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $baseName);
-    $safeName = trim($safeName, '_');
+function sendConfigFile($chatId, string $baseName, string $content, string $caption = '', ?array $replyMarkup = null): void {
+    // فقط کاراکترهایی که واقعاً توی اسم فایل مشکل‌سازن (جداکننده مسیر، کوتیشن،
+    // کاراکترهای کنترلی) حذف می‌شن؛ حروف فارسی/ایموجی (اسم واقعی کانفیگ) نگه
+    // داشته می‌شن چون تلگرام اسم فایل یونیکد رو بدون مشکل نمایش می‌ده.
+    $safeName = preg_replace('/[\/\\\\:\*\?"<>\|\x00-\x1F]+/u', '_', $baseName);
+    $safeName = trim((string)$safeName, " ._");
     if ($safeName === '') $safeName = 'wireguard';
-    $safeName = substr($safeName, 0, 40);
+    $safeName = mb_substr($safeName, 0, 60, 'UTF-8');
 
     $tmpFile = tempnam(sys_get_temp_dir(), 'wg_');
     if ($tmpFile === false) return;
@@ -1456,6 +1459,7 @@ function sendConfigFile($chatId, string $baseName, string $content, string $capt
         $postData['caption']    = applyPremiumToText($caption);
         $postData['parse_mode'] = 'HTML';
     }
+    if ($replyMarkup) $postData['reply_markup'] = json_encode($replyMarkup);
 
     $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 30]);
@@ -3126,6 +3130,12 @@ try {
                                 }
                             }
 
+                            // به‌جای فرستادن یه پیام جداگانه‌ی «شروع/پایان ارسال» قبل و بعد،
+                            // دکمه‌ی بازگشت مستقیم روی آخرین پیامی که واقعاً فرستاده می‌شه
+                            // می‌شینه؛ سریع‌تره چون یکی-دو پیام اضافه کمتر رد و بدل می‌شه.
+                            $backKb  = ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]];
+                            $hasWg   = !empty($wgConfigs);
+
                             if (!empty($textConfigs)) {
                                 $messages    = [];
                                 $currentText = "✅ <b>کانفیگ‌های شما:</b>\n\n";
@@ -3136,25 +3146,26 @@ try {
                                     $currentText .= $block;
                                 }
                                 if (!empty($currentText)) $messages[] = $currentText;
-                                foreach ($messages as $msg) {
-                                    sendMessage($chatId, $msg);
-                                    usleep(250000);
+                                $lastTextIdx = count($messages) - 1;
+                                foreach ($messages as $idx => $msg) {
+                                    $isLast = !$hasWg && $idx === $lastTextIdx;
+                                    sendMessage($chatId, $msg, $isLast ? $backKb : null);
+                                    if ($idx < $lastTextIdx) usleep(250000);
                                 }
                             }
 
-                            if (!empty($wgConfigs)) {
+                            if ($hasWg) {
                                 // کانفیگ وایرگارد یه لینک تکی نیست؛ چون خودش یه فایل .conf کامله،
                                 // به‌جای متن توی چت، مستقیم به‌عنوان فایل قابل‌ایمپورت فرستاده می‌شه.
-                                sendMessage($chatId, "📎 کانفیگ‌(های) وایرگارد به‌صورت فایل .conf ارسال می‌شن:");
-                                foreach ($wgConfigs as $c) {
+                                $lastWgIdx = count($wgConfigs) - 1;
+                                foreach ($wgConfigs as $idx => $c) {
                                     $nameWithFlag = addFlagToConfigName($c['name']);
                                     $caption = "📌 {$nameWithFlag}\n<b>team kan</b>";
-                                    sendConfigFile($chatId, $c['name'] ?: ($c['server'] ?: 'wireguard'), $c['raw'], $caption);
-                                    usleep(250000);
+                                    $isLast  = $idx === $lastWgIdx;
+                                    sendConfigFile($chatId, $c['name'] ?: ($c['server'] ?: 'wireguard'), $c['raw'], $caption, $isLast ? $backKb : null);
+                                    if (!$isLast) usleep(250000);
                                 }
                             }
-
-                            sendMessage($chatId, "✅ ارسال کانفیگ‌ها تمام شد.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]]);
                         } else {
                             $emptyText = (is_array($subData) && ($subData['error'] ?? '') === 'html_page')
                                 ? "🌐 این لینک یک صفحه‌ی وب است، نه ساب مستقیم؛ کانفیگی برای دریافت وجود ندارد."
