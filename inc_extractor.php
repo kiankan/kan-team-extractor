@@ -35,6 +35,7 @@ class AdvancedSubExtractor {
         }
 
         $configs = $this->parseAny($response);
+        $useBrowserUA = false;
 
         // بعضی سرورها (مثل Cloudflare Workers) درخواست با User-Agent کلاینت وی‌پی‌ان رو بلاک می‌کنن
         // اگه چیزی پیدا نشد، یک‌بار دیگه با هدر یک مرورگر معمولی امتحان می‌کنیم.
@@ -42,9 +43,11 @@ class AdvancedSubExtractor {
             $response2 = $this->fetchUrl($url, true);
             if ($response2 !== null && $response2 !== $response) {
                 $configs2 = $this->parseAny($response2);
-                if (!empty($configs2)) $configs = $configs2;
+                if (!empty($configs2)) { $configs = $configs2; $response = $response2; $useBrowserUA = true; }
             }
         }
+
+        $configs = $this->mergeWireguardHostVariants($url, $response, $configs, $useBrowserUA);
 
         $result = $this->buildResult($configs);
         if ($result['total_configs'] === 0) {
@@ -64,6 +67,41 @@ class AdvancedSubExtractor {
     // موازی) نیاز به گرفتن پاسخ خام داره ولی پارسش رو بعداً با extractFromResponse انجام می‌ده
     public function fetchRaw(string $url, bool $useBrowserUA = false): ?string {
         return $this->fetchUrl($url, $useBrowserUA);
+    }
+
+    // بعضی پنل‌های وایرگارد (مثل asan-ps) به‌جای دادنِ همه‌ی سرورها زیر یک لینک، از
+    // پارامتر ?host=2, ?host=3, ... روی همون لینکِ ساب برای سوییچ بین سرورها استفاده
+    // می‌کنن (لینک پایه بدون پارامتر معادل host=1 هست). این متد وقتی پاسخِ پایه
+    // وایرگارده، همین پارامتر رو با شماره‌های بعدی امتحان می‌کنه و هر سرور جدیدی که
+    // پیدا کنه رو اضافه می‌کنه؛ وقتی پاسخ تکراری بشه (یعنی سرورها تموم شدن و برگشته
+    // به همون اولی) یا دیگه وایرگارد نباشه، متوقف می‌شه — نه بی‌نهایت زنجیر می‌شه، نه
+    // برای ساب‌های غیروایرگارد حتی یه درخواست اضافه می‌زنه.
+    public function mergeWireguardHostVariants(string $url, string $baseResponse, array $configs, bool $useBrowserUA = false): array {
+        if (!$this->isWireguardConf($baseResponse)) return $configs;
+
+        $seenResponses = [$baseResponse];
+        $existingRaw   = array_column($configs, 'raw');
+
+        for ($hostIdx = 2; $hostIdx <= 12; $hostIdx++) {
+            $sep        = (strpos($url, '?') === false) ? '?' : '&';
+            $variantUrl = $url . $sep . 'host=' . $hostIdx;
+            $resp       = $this->fetchUrl($variantUrl, $useBrowserUA);
+
+            if ($resp === null || $resp === '') break;
+            if (in_array($resp, $seenResponses, true)) break; // تکرار شد یعنی سرورها تموم شدن
+            $seenResponses[] = $resp;
+
+            if (!$this->isWireguardConf($resp)) break;
+
+            foreach ($this->parseWireguardConf($resp) as $c) {
+                if (!in_array($c['raw'], $existingRaw, true)) {
+                    $configs[]      = $c;
+                    $existingRaw[]  = $c['raw'];
+                }
+            }
+        }
+
+        return $configs;
     }
 
     private function parseAny(string $response): array {
@@ -510,7 +548,7 @@ class AdvancedSubExtractor {
         };
     }
 
-    private function buildResult(array $configs): array {
+    public function buildResult(array $configs): array {
         $protocols = [];
         foreach ($configs as $c) {
             $p = strtolower($c['protocol']);
