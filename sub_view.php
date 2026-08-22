@@ -39,9 +39,16 @@ function renderNotFound(string $model = 'modern', string $theme = 'black'): void
         'sapphire' => ['bg' => '#070a0e', 'bg1' => '168,189,217', 'bg2' => '201,219,240', 'boxBg' => 'rgba(13,19,27,.85)', 'boxBorder' => '35,48,71', 'icon' => '168,189,217', 'text' => '#e9eef3', 'muted' => '#6f7f8f', 'grad1' => '#e9eef3', 'grad2' => '#a8bdd9'],
         'onyx'     => ['bg' => '#050505', 'bg1' => '232,232,232', 'bg2' => '255,255,255', 'boxBg' => 'rgba(12,12,12,.85)', 'boxBorder' => '44,44,44', 'icon' => '232,232,232', 'text' => '#f5f5f5', 'muted' => '#828282', 'grad1' => '#f5f5f5', 'grad2' => '#e8e8e8'],
     ];
+    $palettesCorporate = [
+        'blue'    => ['bg' => '#f4f6fb', 'bg1' => '37,99,235',  'bg2' => '14,165,233', 'boxBg' => 'rgba(255,255,255,.9)', 'boxBorder' => '210,218,235', 'icon' => '37,99,235',  'text' => '#151a2e', 'muted' => '#5b6472', 'grad1' => '#1d4ed8', 'grad2' => '#2563eb'],
+        'teal'    => ['bg' => '#f3f8f7', 'bg1' => '13,148,136', 'bg2' => '20,184,166', 'boxBg' => 'rgba(255,255,255,.9)', 'boxBorder' => '205,228,224', 'icon' => '13,148,136', 'text' => '#12211f', 'muted' => '#587570', 'grad1' => '#0f766e', 'grad2' => '#14b8a6'],
+        'emerald' => ['bg' => '#f3f9f4', 'bg1' => '5,150,105',  'bg2' => '16,185,129', 'boxBg' => 'rgba(255,255,255,.9)', 'boxBorder' => '203,229,213', 'icon' => '5,150,105',  'text' => '#0f2018', 'muted' => '#547462', 'grad1' => '#047857', 'grad2' => '#10b981'],
+        'rose'    => ['bg' => '#faf4f6', 'bg1' => '190,24,93',  'bg2' => '236,72,153', 'boxBg' => 'rgba(255,255,255,.9)', 'boxBorder' => '235,209,220', 'icon' => '190,24,93',  'text' => '#241019', 'muted' => '#7a5563', 'grad1' => '#9d174d', 'grad2' => '#db2777'],
+    ];
     if ($model === 'classic') { $palettes = $palettesClassic; $fallbackKey = 'default'; }
     elseif ($model === 'terminal') { $palettes = $palettesTerminal; $fallbackKey = 'green'; }
     elseif ($model === 'elite') { $palettes = $palettesElite; $fallbackKey = 'gold'; }
+    elseif ($model === 'corporate') { $palettes = $palettesCorporate; $fallbackKey = 'blue'; }
     else { $palettes = $palettesModern; $fallbackKey = 'black'; }
     $p = $palettes[$theme] ?? $palettes[$fallbackKey];
     ?>
@@ -101,7 +108,7 @@ try {
 // هر مدل تم‌های رنگی خودش رو داره.
 // همین یه‌بار می‌خونیمش و هم برای صفحه‌ی اصلی هم برای صفحه‌ی «یافت نشد/منقضی‌شده» استفاده می‌شه.
 $subViewModel = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'sub_view_model'")->fetchColumn() ?: 'modern');
-if (!in_array($subViewModel, ['classic', 'modern', 'terminal', 'elite'], true)) $subViewModel = 'modern';
+if (!in_array($subViewModel, ['classic', 'modern', 'terminal', 'elite', 'corporate'], true)) $subViewModel = 'modern';
 
 if ($subViewModel === 'classic') {
     $allowedThemes = ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'];
@@ -115,6 +122,10 @@ if ($subViewModel === 'classic') {
     $allowedThemes = ['gold', 'platinum', 'rosegold', 'emerald', 'sapphire', 'onyx'];
     $subViewTheme = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'sub_view_theme_elite'")->fetchColumn() ?: 'gold');
     if (!in_array($subViewTheme, $allowedThemes, true)) $subViewTheme = 'gold';
+} elseif ($subViewModel === 'corporate') {
+    $allowedThemes = ['blue', 'teal', 'emerald', 'rose'];
+    $subViewTheme = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'sub_view_theme_corporate'")->fetchColumn() ?: 'blue');
+    if (!in_array($subViewTheme, $allowedThemes, true)) $subViewTheme = 'blue';
 } else {
     $allowedThemes = ['black', 'white', 'red', 'purple', 'ocean', 'emerald'];
     $subViewTheme = (string)($pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'sub_view_theme_modern'")->fetchColumn() ?: 'black');
@@ -1835,7 +1846,661 @@ async function refreshData(){
 </script>
 </body>
 </html>
+<?php elseif ($subViewModel === "corporate"): ?>
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>وضعیت اشتراک شما</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preload" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css"></noscript>
+<style>
+    :root{
+        --bg:#f4f6fb; --surface:#ffffff; --surface-2:#f1f3f9;
+        --border:#e2e6f0; --text:#151a2e; --muted:#5b6472;
+        --accent:#2563eb; --accent-ink:#f4f8ff; --accent-soft:#e8f0fe;
+        --success:#0f9d63; --success-soft:#e6f7ee;
+        --warn:#b7791f; --warn-soft:#fbf1de;
+        --danger:#d1345b; --danger-soft:#fbe7ec;
+        --shadow:0 1px 2px rgba(20,20,40,.04), 0 10px 28px rgba(20,20,40,.06);
+    }
+    :root[data-theme="teal"]{ --accent:#0f766e; --accent-soft:#e3f3f1; --accent-ink:#f2fbfa; }
+    :root[data-theme="emerald"]{ --accent:#059669; --accent-soft:#e4f6ee; --accent-ink:#f2fbf6; }
+    :root[data-theme="rose"]{ --accent:#be185d; --accent-soft:#fbe8f1; --accent-ink:#fef4f8; }
+
+    *{ box-sizing:border-box; }
+    body{
+        font-family:'Vazirmatn',Tahoma,sans-serif; background:var(--bg); color:var(--text);
+        margin:0; padding:26px 16px 60px; min-height:100vh;
+    }
+    .wrap{ max-width:460px; margin:0 auto; }
+
+    .head{ text-align:center; margin-bottom:18px; display:flex; flex-direction:column; align-items:center; gap:10px; }
+    .head .icon{
+        width:44px; height:44px; border-radius:13px; margin:0 auto; background:var(--accent); color:var(--accent-ink);
+        display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:800;
+    }
+    .head h1{ font-size:18px; margin:0 0 4px; font-weight:800; color:var(--text); }
+    .head .sub{ color:var(--muted); font-size:12px; }
+    .head .sub b{ color:var(--accent); font-weight:700; }
+
+    .status-badge{
+        display:flex; align-items:center; justify-content:center; gap:8px; padding:13px; border-radius:13px;
+        font-weight:700; font-size:13px; margin-bottom:14px; border:1px solid;
+    }
+    .status-badge::before{ content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+    .status-active{ background:var(--success-soft); border-color:#bfe6d3; color:var(--success); }
+    .status-inactive{ background:var(--danger-soft); border-color:#f3c3d1; color:var(--danger); }
+
+    .card{
+        background:var(--surface); border:1px solid var(--border); border-radius:18px;
+        padding:20px; margin-bottom:14px; box-shadow:var(--shadow);
+    }
+    .card-title{ display:flex; align-items:center; justify-content:space-between; font-size:12.5px; color:var(--muted); font-weight:700; margin-bottom:12px; gap:8px; }
+    .card-percent{ font-size:15px; font-weight:800; white-space:nowrap; color:var(--text); }
+    .bar-bg{ width:100%; height:9px; border-radius:99px; background:var(--surface-2); overflow:hidden; margin-bottom:12px; }
+    .bar-fill{ height:100%; border-radius:99px; background:var(--accent); transition:width .5s; }
+    .bar-fill.warn{ background:var(--warn); }
+    .card-foot{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--muted); }
+    .card-foot b{ color:var(--text); }
+
+    .protocols{ display:flex; flex-wrap:wrap; gap:8px; }
+    .proto-pill{
+        font-size:12px; padding:6px 12px; border-radius:999px; background:var(--accent-soft); color:var(--accent);
+        border:1px solid transparent; font-weight:700; cursor:pointer;
+    }
+
+    .actions{ display:flex; flex-direction:column; gap:9px; }
+    .action-btn{
+        display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-radius:13px;
+        background:var(--surface-2); border:1px solid var(--border); cursor:pointer; transition:.18s;
+        font-family:inherit; color:var(--text); font-size:13.5px; font-weight:700; width:100%; text-align:right;
+    }
+    .action-btn:hover{ border-color:var(--accent); transform:translateY(-1px); }
+    .action-btn:disabled{ opacity:.5; cursor:not-allowed; transform:none; }
+    .action-btn .copy-tag{ font-size:11px; color:var(--accent); background:var(--accent-soft); padding:4px 10px; border-radius:8px; white-space:nowrap; }
+    .action-btn.copied .copy-tag{ color:var(--success); background:var(--success-soft); }
+    .action-btn.primary-action{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+    .action-btn.primary-action .copy-tag{ background:rgba(255,255,255,.18); color:var(--accent-ink); }
+
+    .spin{ display:inline-block; width:13px; height:13px; border-radius:50%; border:2px solid rgba(0,0,0,.12); border-top-color:var(--accent); animation:spin 0.7s linear infinite; vertical-align:-2px; }
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+
+    .qr-wrap{ text-align:center; }
+    .qr-wrap img{ width:190px; height:190px; border-radius:14px; background:#fff; padding:10px; border:1px solid var(--border); }
+
+    .search-box{
+        width:100%; padding:11px 14px; border-radius:11px; border:1px solid var(--border); background:var(--surface-2);
+        color:var(--text); font-size:13px; font-family:inherit; margin-bottom:12px;
+    }
+    .search-box::placeholder{ color:var(--muted); }
+    .search-box:focus{ outline:none; border-color:var(--accent); }
+    .config-list{ display:flex; flex-direction:column; gap:8px; max-height:420px; overflow-y:auto; padding-inline-end:4px; }
+    .config-item{
+        display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--border);
+        border-radius:12px; padding:10px 12px; transition:.15s;
+    }
+    .config-item:hover{ border-color:var(--accent); }
+    .config-item .ci-flag{ font-size:20px; flex-shrink:0; line-height:1; }
+    .config-item .ci-info{ flex:1; min-width:0; }
+    .config-item .ci-name{
+        font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        direction:ltr; unicode-bidi:plaintext; text-align:right; color:var(--text);
+    }
+    .config-item .ci-proto{
+        font-size:10.5px; color:var(--muted); margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        direction:ltr; unicode-bidi:plaintext; text-align:right; letter-spacing:.2px;
+    }
+    .config-item .ci-proto b{ color:var(--accent); font-weight:700; }
+    .config-item .ci-actions{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
+    .config-item .ci-btn{
+        font-size:11px; color:var(--accent); background:var(--accent-soft); padding:6px 10px; border-radius:8px;
+        border:1px solid transparent; cursor:pointer; font-family:inherit; transition:.15s; white-space:nowrap;
+    }
+    .config-item .ci-btn:hover{ border-color:var(--accent); }
+    .config-item .ci-btn.ci-copy.copied{ color:var(--success); background:var(--success-soft); }
+    .config-item .ci-btn.ci-qr{ color:#2563eb; background:#e8f0fe; }
+    .config-empty{ text-align:center; color:var(--muted); font-size:12.5px; padding:20px; }
+
+    .theme-row{ display:flex; justify-content:center; gap:10px; margin-top:6px; margin-bottom:8px; }
+    .theme-dot{ width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid var(--surface); box-shadow:0 0 0 1px var(--border); }
+    .theme-dot.active{ box-shadow:0 0 0 2px var(--accent); }
+    .td-blue{ background:#2563eb; } .td-teal{ background:#0f766e; } .td-emerald{ background:#059669; } .td-rose{ background:#be185d; }
+
+    .app-grid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+    .app-card{ display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 10px; border-radius:14px; background:var(--surface-2); border:1px solid var(--border); text-decoration:none; color:var(--text); }
+    .app-card .app-icon{ width:38px; height:38px; border-radius:11px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; }
+    .app-card .app-name{ font-size:12.5px; font-weight:700; }
+    .app-card .app-tag{ font-size:10.5px; color:var(--muted); }
+
+    .toast{
+        position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(10px); background:var(--text); color:#fff;
+        padding:12px 22px; border-radius:13px; font-size:13px;
+        opacity:0; transition:.3s; pointer-events:none; z-index:999; font-weight:600; box-shadow:0 12px 30px rgba(20,20,40,.25);
+    }
+    .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+    .footer{ text-align:center; color:var(--muted); font-size:11.5px; margin-top:22px; line-height:1.9; }
+    .footer b{ color:var(--accent); }
+
+    ::-webkit-scrollbar{ width:6px; }
+    ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:99px; }
+
+    .qr-modal{
+        position:fixed; inset:0; background:rgba(20,20,35,.55); backdrop-filter:blur(6px);
+        display:none; align-items:center; justify-content:center; z-index:1000; padding:20px;
+    }
+    .qr-modal.show{ display:flex; }
+    .qr-modal-inner{
+        background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:24px;
+        max-width:300px; width:100%; text-align:center; box-shadow:0 20px 60px rgba(20,20,40,.25);
+    }
+    .qr-modal-title{
+        font-size:13px; font-weight:700; margin-bottom:16px; color:var(--text);
+        direction:ltr; unicode-bidi:plaintext; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .qr-modal-inner img{ width:210px; height:210px; border-radius:14px; background:#fff; padding:10px; border:1px solid var(--border); }
+    .qr-modal-close{
+        margin-top:16px; width:100%; padding:11px; border-radius:11px; border:1px solid var(--border);
+        background:var(--surface-2); color:var(--text); cursor:pointer; font-family:inherit; font-weight:700; font-size:13px;
+    }
+    .qr-modal-close:hover{ border-color:var(--accent); }
+</style>
+</head>
+<body data-theme="<?= htmlspecialchars($subViewTheme, ENT_QUOTES, 'UTF-8') ?>">
+
+<div class="wrap">
+    <div class="head">
+        <div class="icon" id="headIcon"><?= $isActive ? '✓' : '×' ?></div>
+        <h1>وضعیت اشتراک شما</h1>
+        <div class="sub">آخرین بروزرسانی: <b id="updatedAtText"><?= htmlspecialchars((string)$updatedAt, ENT_QUOTES, 'UTF-8') ?></b></div>
+        <div class="sub" style="margin-top:2px; opacity:.85;">این لینک تا ۵ دقیقه بعد از آخرین بروزرسانی معتبر است.</div>
+    </div>
+
+    <div class="status-badge <?= $isActive ? 'status-active' : 'status-inactive' ?>" id="statusBadge">
+        <?= $isActive ? 'اشتراک فعال' : 'اشتراک منقضی شده' ?>
+    </div>
+
+    <div class="theme-row" id="themePicker">
+        <div class="theme-dot td-blue" data-theme="blue" title="آبی"></div>
+        <div class="theme-dot td-teal" data-theme="teal" title="فیروزه‌ای"></div>
+        <div class="theme-dot td-emerald" data-theme="emerald" title="زمرد"></div>
+        <div class="theme-dot td-rose" data-theme="rose" title="رز"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">
+            <span>حجم مصرفی</span>
+            <span class="card-percent" id="volPercentText"><?= $hasVolumeLimit ? $usedPercent . '%' : 'نامحدود' ?></span>
+        </div>
+        <div class="bar-bg"><div class="bar-fill <?= $usedPercent >= 85 ? 'warn' : '' ?>" id="volBar" style="width:<?= $hasVolumeLimit ? $usedPercent : 3 ?>%"></div></div>
+        <div class="card-foot">
+            <span>مصرف شده: <b id="volUsedText"><?= fmtBytes($usedBytes) ?></b></span>
+            <span>حجم کل: <b id="volTotalText"><?= $hasVolumeLimit ? fmtBytes($totalBytes) : 'نامحدود' ?></b></span>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">
+            <span>زمان باقی‌مانده</span>
+            <span class="card-percent" id="daysLeftText"><?= $hasExpiry ? $daysLeft . ' روز' : 'نامحدود' ?></span>
+        </div>
+        <?php if ($hasExpiry): ?>
+        <div class="bar-bg"><div class="bar-fill <?= $daysLeft !== null && $daysLeft <= 3 ? 'warn' : '' ?>" id="timeBar" style="width:<?= $expiredByTime ? 0 : 100 ?>%"></div></div>
+        <?php endif; ?>
+        <div class="card-foot">
+            <span>تعداد کانفیگ‌ها: <b id="configCountText"><?= (int)($row['total_configs'] ?? 0) ?></b></span>
+            <span>انقضا: <b id="expireDateText"><?= $hasExpiry ? date('Y/m/d', $expireTs) : 'نامحدود' ?></b></span>
+        </div>
+    </div>
+
+    <div class="card" id="protocolsCard" <?= empty($protocolCounts) ? 'style="display:none"' : '' ?>>
+        <div class="card-title"><span>پروتکل‌ها</span></div>
+        <div class="protocols" id="protoPills">
+            <?php foreach ($protocolCounts as $proto => $count): ?>
+                <span class="proto-pill" onclick="filterByProtocol('<?= htmlspecialchars(addslashes($proto), ENT_QUOTES, 'UTF-8') ?>')"><?= htmlspecialchars($proto, ENT_QUOTES, 'UTF-8') ?>: <?= $count ?></span>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <?php if ($subUrl !== ''): ?>
+    <div class="card qr-wrap">
+        <div class="card-title" style="justify-content:center; margin-bottom:14px;"><span>QR کد ساب‌اسکریپشن</span></div>
+        <img src="<?= htmlspecialchars($qrUrl, ENT_QUOTES, 'UTF-8') ?>" alt="QR Code" loading="lazy">
+    </div>
+    <?php endif; ?>
+
+    <div class="card">
+        <div class="card-title"><span>دریافت کانفیگ و اشتراک‌ها</span></div>
+        <div class="actions">
+            <button class="action-btn primary-action" id="refreshBtn" onclick="refreshData()">
+                <span id="refreshBtnLabel">بروزرسانی زنده اطلاعات</span>
+                <span class="copy-tag">به‌روز کن</span>
+            </button>
+            <?php if ($subUrl !== ''): ?>
+            <button class="action-btn" onclick="copyText(this, SUB_URL)">
+                <span>کپی لینک ساب‌اسکریپشن</span>
+                <span class="copy-tag">کپی</span>
+            </button>
+            <?php endif; ?>
+            <?php if ($firstVless): ?>
+            <button class="action-btn" onclick="copyText(this, FIRST_VLESS)">
+                <span>کپی کانفیگ VLESS (مستقیم)</span>
+                <span class="copy-tag">کپی</span>
+            </button>
+            <?php endif; ?>
+            <button class="action-btn" onclick="copyAllConfigs(this)">
+                <span>کپی همه‌ی کانفیگ‌ها</span>
+                <span class="copy-tag">کپی</span>
+            </button>
+            <button class="action-btn" onclick="downloadAllConfigs()">
+                <span>دانلود فایل کانفیگ‌ها (txt)</span>
+                <span class="copy-tag">دانلود</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">
+            <span>لیست کانفیگ‌ها</span>
+            <span class="card-percent" id="configListCount">۰</span>
+        </div>
+        <input type="text" class="search-box" id="configSearch" placeholder="جستجو بر اساس نام یا پروتکل...">
+        <div class="config-list" id="configList"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><span>برنامه‌های پیشنهادی</span></div>
+        <div class="app-grid">
+            <a class="app-card" href="https://play.google.com/store/apps/details?id=com.v2ray.ang" target="_blank" rel="noopener">
+                <div class="app-icon">V2</div>
+                <div class="app-name">V2rayNG</div>
+                <div class="app-tag">محبوب‌ترین</div>
+            </a>
+            <a class="app-card" href="https://play.google.com/store/apps/details?id=app.hiddify.com" target="_blank" rel="noopener">
+                <div class="app-icon">HN</div>
+                <div class="app-name">Hiddify Next</div>
+                <div class="app-tag">همه‌کاره</div>
+            </a>
+            <a class="app-card" href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases" target="_blank" rel="noopener">
+                <div class="app-icon">CM</div>
+                <div class="app-name">Clash Meta</div>
+                <div class="app-tag">پیشرفته</div>
+            </a>
+            <a class="app-card" href="https://play.google.com/store/apps/details?id=com.napsternetlabs.napsternetv" target="_blank" rel="noopener">
+                <div class="app-icon">NV</div>
+                <div class="app-name">NapsternetV</div>
+                <div class="app-tag">سبک</div>
+            </a>
+        </div>
+    </div>
+
+    <div class="footer">
+        این صفحه به‌صورت خودکار از داخل ربات ساخته شده است — <b>Team Kan</b>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="qr-modal" id="qrModal" onclick="closeQrModal(event)">
+    <div class="qr-modal-inner">
+        <div class="qr-modal-title" id="qrModalTitle"></div>
+        <img id="qrModalImg" src="" alt="QR Code">
+        <button class="qr-modal-close" onclick="closeQrModal(event)">بستن ✕</button>
+    </div>
+</div>
+
+<script>
+const TOKEN = <?= json_encode($token) ?>;
+const SUB_URL = <?= json_encode($subUrl, JSON_UNESCAPED_SLASHES) ?>;
+const FIRST_VLESS = <?= json_encode($firstVless['raw'] ?? '', JSON_UNESCAPED_SLASHES) ?>;
+let CONFIGS = <?= json_encode($configs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+const cDots = document.querySelectorAll('#themePicker .theme-dot');
+function setActiveCDot(theme){ cDots.forEach(d => d.classList.toggle('active', d.dataset.theme === theme)); }
+setActiveCDot(document.body.getAttribute('data-theme') || 'blue');
+cDots.forEach(dot=>{
+  dot.addEventListener('click', ()=>{
+    setActiveCDot(dot.dataset.theme);
+    document.body.setAttribute('data-theme', dot.dataset.theme);
+  });
+});
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function copyText(btn, text) {
+    if (!text) { showToast('❌ چیزی برای کپی وجود ندارد.'); return; }
+    navigator.clipboard.writeText(text).then(() => {
+        const tag = btn.querySelector('.copy-tag');
+        const original = tag.textContent;
+        btn.classList.add('copied');
+        tag.textContent = 'کپی شد ✓';
+        setTimeout(() => { btn.classList.remove('copied'); tag.textContent = original; }, 1800);
+    }).catch(() => showToast('❌ کپی ناموفق بود.'));
+}
+
+function copyAllConfigs(btn) {
+    if (!CONFIGS.length) { showToast('❌ کانفیگی موجود نیست.'); return; }
+    const text = CONFIGS.map(c => c.raw).join('\n');
+    copyText(btn, text);
+}
+
+function downloadAllConfigs() {
+    if (!CONFIGS.length) { showToast('❌ کانفیگی موجود نیست.'); return; }
+    const text = CONFIGS.map(c => c.raw).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'configs_' + TOKEN + '.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast('⬇️ فایل کانفیگ‌ها دانلود شد.');
+}
+
+// وایرگارد برخلاف بقیه پروتکل‌ها یه لینک تکی نیست، خودِ متنش یک فایل .conf کامل و
+// مستقله؛ برای همین به‌جای اضافه‌شدن به فایل ترکیبی .txt بالا، هر کانفیگ وایرگارد
+// جدا دانلود می‌شه. دانلود از سمت سرور (ریدایرکت به sub_view.php?dl_conf=) انجام
+// می‌شه، نه با Blob سمت کلاینت، چون توی وب‌ویوهای محدود (مثل مرورگر داخلی تلگرام)
+// دانلود Blob کار نمی‌کرد و به‌جاش متن خام رو نشون می‌داد.
+function downloadConfigFile(c) {
+    const idx = CONFIGS.indexOf(c);
+    if (idx === -1) { showToast('❌ این کانفیگ قابل‌دانلود نیست.'); return; }
+    window.location.href = 'sub_view.php?id=' + encodeURIComponent(TOKEN) + '&dl_conf=' + idx;
+}
+
+function filterByProtocol(proto) {
+    const box = document.getElementById('configSearch');
+    box.value = proto;
+    renderConfigList(proto);
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function showConfigQR(raw, name) {
+    if (!raw) { showToast('❌ چیزی برای نمایش QR نیست.'); return; }
+    document.getElementById('qrModalTitle').textContent = name || 'Config';
+    document.getElementById('qrModalImg').src =
+        'https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=' + encodeURIComponent(raw) + '&bgcolor=255-255-255&color=0-0-0&margin=1';
+    document.getElementById('qrModal').classList.add('show');
+}
+
+function closeQrModal(e) {
+    if (e.target.id === 'qrModal' || e.target.classList.contains('qr-modal-close')) {
+        document.getElementById('qrModal').classList.remove('show');
+    }
+}
+
+function decodeBase64Safe(str) {
+    try {
+        str = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (str.length % 4) str += '=';
+        return decodeURIComponent(escape(atob(str)));
+    } catch (e) { return ''; }
+}
+
+function extractHostPort(raw) {
+    if (!raw) return { host: '', port: '' };
+    try {
+        const schemeMatch = raw.match(/^([a-z0-9]+):\/\//i);
+        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
+
+        if (scheme === 'vmess') {
+            const json = JSON.parse(decodeBase64Safe(raw.slice(8).split('#')[0].split('?')[0]));
+            return { host: json.add || '', port: String(json.port || '') };
+        }
+
+        if (scheme === 'ssr') {
+            const body = decodeBase64Safe(raw.slice(6).split('#')[0]);
+            const m = body.match(/^([^:]+):(\d+):/);
+            if (m) return { host: m[1], port: m[2] };
+        }
+
+        if (scheme === 'ss') {
+            const rest = raw.slice(5).split('#')[0];
+            let m = rest.match(/@([^:\/?#]+):(\d+)/);
+            if (m) return { host: m[1], port: m[2] };
+            const decoded = decodeBase64Safe(rest.split('?')[0]);
+            m = decoded.match(/@([^:\/?#]+):(\d+)/);
+            if (m) return { host: m[1], port: m[2] };
+        }
+
+        const m = raw.match(/^[a-z0-9]+:\/\/(?:[^@\/?#]*@)?(\[[^\]]+\]|[^:\/?#]+)(?::(\d+))?/i);
+        if (m) {
+            const host = m[1].replace(/^\[|\]$/g, '');
+            return { host, port: m[2] || '' };
+        }
+    } catch (e) {}
+    return { host: '', port: '' };
+}
+
+function codeToFlag(code) {
+    return code.toUpperCase().replace(/./g, ch => String.fromCodePoint(127397 + ch.charCodeAt(0)));
+}
+
+const COUNTRY_MAP = {
+    'germany':'DE','frankfurt':'DE','deutschland':'DE','france':'FR','paris':'FR',
+    'usa':'US','united states':'US','america':'US','uk':'GB','england':'GB','london':'GB','britain':'GB',
+    'netherlands':'NL','amsterdam':'NL','holland':'NL','turkey':'TR','istanbul':'TR','türkiye':'TR',
+    'finland':'FI','poland':'PL','russia':'RU','moscow':'RU','iran':'IR','tehran':'IR',
+    'uae':'AE','dubai':'AE','emirates':'AE','singapore':'SG','japan':'JP','tokyo':'JP','canada':'CA',
+    'sweden':'SE','switzerland':'CH','italy':'IT','spain':'ES','south korea':'KR','korea':'KR',
+    'india':'IN','brazil':'BR','austria':'AT','belgium':'BE','romania':'RO','ukraine':'UA',
+    'hongkong':'HK','hong kong':'HK','australia':'AU','denmark':'DK','norway':'NO','czech':'CZ',
+    'ireland':'IE','portugal':'PT','greece':'GR','bulgaria':'BG','lithuania':'LT','latvia':'LV',
+    'estonia':'EE','kazakhstan':'KZ','malaysia':'MY','thailand':'TH','vietnam':'VN','indonesia':'ID',
+    'mexico':'MX','argentina':'AR','south africa':'ZA','egypt':'EG','israel':'IL','saudi':'SA'
+};
+
+function guessFlag(text) {
+    if (!text) return '';
+    const flagMatch = text.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
+    if (flagMatch) return flagMatch[0];
+    const lower = text.toLowerCase();
+    for (const key in COUNTRY_MAP) {
+        if (lower.includes(key)) return codeToFlag(COUNTRY_MAP[key]);
+    }
+    return '🌐';
+}
+
+function renderConfigList(filterText) {
+    const container = document.getElementById('configList');
+    const q = (filterText || '').trim().toLowerCase();
+
+    const filtered = CONFIGS.filter(c => {
+        if (!q) return true;
+        return (c.name || '').toLowerCase().includes(q) || (c.protocol || '').toLowerCase().includes(q);
+    });
+
+    document.getElementById('configListCount').textContent = filtered.length + ' از ' + CONFIGS.length;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="config-empty">کانفیگی با این مشخصات یافت نشد.</div>';
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    filtered.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'config-item';
+
+        const { host, port } = extractHostPort(c.raw || '');
+        const address = host ? (host + (port ? ':' + port : '')) : 'آدرس نامشخص';
+
+        const flagEl = document.createElement('span');
+        flagEl.className = 'ci-flag';
+        flagEl.textContent = guessFlag((c.name || '') + ' ' + host);
+
+        const info = document.createElement('div');
+        info.className = 'ci-info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'ci-name';
+        nameEl.dir = 'ltr';
+        nameEl.textContent = c.name || 'Config';
+        const protoEl = document.createElement('div');
+        protoEl.className = 'ci-proto';
+        protoEl.dir = 'ltr';
+        const protoLabel = document.createElement('b');
+        protoLabel.textContent = (c.protocol || '').toUpperCase();
+        protoEl.appendChild(protoLabel);
+        protoEl.appendChild(document.createTextNode(' • ' + address));
+        info.appendChild(nameEl);
+        info.appendChild(protoEl);
+
+        const actions = document.createElement('div');
+        actions.className = 'ci-actions';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'ci-btn ci-copy';
+        copyBtn.textContent = 'کپی';
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(c.raw || '').then(() => {
+                copyBtn.classList.add('copied');
+                const original = copyBtn.textContent;
+                copyBtn.textContent = 'کپی شد ✓';
+                setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.textContent = original; }, 1500);
+            }).catch(() => showToast('❌ کپی ناموفق بود.'));
+        });
+
+        const qrBtn = document.createElement('button');
+        qrBtn.className = 'ci-btn ci-qr';
+        qrBtn.textContent = '🔳 QR';
+        qrBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showConfigQR(c.raw || '', c.name || c.protocol || 'Config');
+        });
+
+        actions.appendChild(copyBtn);
+        actions.appendChild(qrBtn);
+
+        if ((c.protocol || '').toLowerCase() === 'wireguard') {
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'ci-btn';
+            dlBtn.textContent = '⬇️ دانلود';
+            dlBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                downloadConfigFile(c);
+            });
+            actions.appendChild(dlBtn);
+        }
+
+        item.appendChild(flagEl);
+        item.appendChild(info);
+        item.appendChild(actions);
+
+        fragment.appendChild(item);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+}
+renderConfigList('');
+
+document.getElementById('configSearch').addEventListener('input', e => renderConfigList(e.target.value));
+
+function fmtBytesJs(bytes) {
+    bytes = parseFloat(bytes) || 0;
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let pow = Math.floor(Math.log(bytes) / Math.log(1024));
+    pow = Math.min(pow, units.length - 1);
+    return (bytes / Math.pow(1024, pow)).toFixed(2) + ' ' + units[pow];
+}
+
+async function refreshData() {
+    const btn = document.getElementById('refreshBtn');
+    const label = document.getElementById('refreshBtnLabel');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const originalLabel = label.textContent;
+    label.innerHTML = '<span class="spin"></span> در حال بروزرسانی...';
+
+    try {
+        const res = await fetch('sub_refresh.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: TOKEN })
+        });
+        const data = await res.json();
+
+        if (!data.ok) {
+            showToast('❌ ' + (data.error || 'بروزرسانی ناموفق بود.'));
+            return;
+        }
+
+        CONFIGS = data.configs || [];
+        renderConfigList(document.getElementById('configSearch').value);
+
+        const totalBytes = parseFloat(data.total_bytes) || 0;
+        const usedBytes   = parseFloat(data.used_bytes) || 0;
+        const hasVolume   = totalBytes > 0;
+        const remainBytes = Math.max(0, totalBytes - usedBytes);
+        const usedPercent = hasVolume ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+
+        document.getElementById('volPercentText').textContent = hasVolume ? usedPercent + '%' : 'نامحدود';
+        document.getElementById('volUsedText').textContent = fmtBytesJs(usedBytes);
+        document.getElementById('volTotalText').textContent = hasVolume ? fmtBytesJs(totalBytes) : 'نامحدود';
+        const volBar = document.getElementById('volBar');
+        volBar.style.width = (hasVolume ? usedPercent : 3) + '%';
+        volBar.classList.toggle('warn', usedPercent >= 85);
+
+        const expireTs = parseInt(data.expire_ts, 10) || 0;
+        const hasExpiry = expireTs > 0;
+        const now = Math.floor(Date.now() / 1000);
+        const daysLeft = hasExpiry ? Math.max(0, Math.ceil((expireTs - now) / 86400)) : null;
+        document.getElementById('daysLeftText').textContent = hasExpiry ? daysLeft + ' روز' : 'نامحدود';
+        document.getElementById('expireDateText').textContent = hasExpiry ? new Date(expireTs * 1000).toLocaleDateString('fa-IR') : 'نامحدود';
+        const timeBar = document.getElementById('timeBar');
+        if (timeBar) {
+            const expiredByTime = hasExpiry && expireTs <= now;
+            timeBar.style.width = (expiredByTime ? 0 : 100) + '%';
+            timeBar.classList.toggle('warn', daysLeft !== null && daysLeft <= 3);
+        }
+
+        document.getElementById('configCountText').textContent = data.total_configs;
+
+        const expiredByVolume = hasVolume && remainBytes <= 0;
+        const expiredByTime = hasExpiry && expireTs <= now;
+        const isActive = !expiredByTime && !expiredByVolume;
+        const badge = document.getElementById('statusBadge');
+        badge.className = 'status-badge ' + (isActive ? 'status-active' : 'status-inactive');
+        badge.textContent = isActive ? 'اشتراک فعال' : 'اشتراک منقضی شده';
+        document.getElementById('headIcon').textContent = isActive ? '✓' : '×';
+
+        const protoPills = document.getElementById('protoPills');
+        const protoCard = document.getElementById('protocolsCard');
+        protoPills.innerHTML = '';
+        const protoEntries = Object.entries(data.protocols || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+        protoCard.style.display = protoEntries.length ? '' : 'none';
+        protoEntries.forEach(([proto, count]) => {
+            const pill = document.createElement('span');
+            pill.className = 'proto-pill';
+            pill.textContent = proto.toUpperCase() + ': ' + count;
+            protoPills.appendChild(pill);
+        });
+
+        document.getElementById('updatedAtText').textContent = data.updated_at;
+
+        showToast('✅ اطلاعات با موفقیت بروزرسانی شد.');
+    } catch (e) {
+        showToast('❌ خطای ارتباط با سرور.');
+    } finally {
+        btn.disabled = false;
+        label.textContent = originalLabel;
+    }
+}
+</script>
+</body>
+</html>
 <?php else: ?>
+
 <!doctype html>
 <html lang="fa" dir="rtl">
 <head>

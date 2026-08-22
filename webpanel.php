@@ -758,7 +758,7 @@ if (isset($_GET['api'])) {
         echo json_encode(['ok' => true, 'status' => getSetting($pdo, 'show_account_btn', 'on')]); exit;
     }
     if ($api === 'set_panel_theme') {
-        $allowedPanelThemes = ['default', 'ocean', 'emerald', 'sunset', 'mono'];
+        $allowedPanelThemes = ['default', 'ocean', 'emerald', 'sunset', 'mono', 'light'];
         $theme = (string)($body['theme'] ?? 'default');
         if (!in_array($theme, $allowedPanelThemes, true)) { echo json_encode(['ok' => false]); exit; }
         setSetting($pdo, 'panel_theme', $theme);
@@ -766,17 +766,18 @@ if (isset($_GET['api'])) {
     }
     if ($api === 'set_sub_model') {
         $model = (string)($body['model'] ?? 'modern');
-        if (!in_array($model, ['classic', 'modern', 'terminal', 'elite'], true)) { echo json_encode(['ok' => false]); exit; }
+        if (!in_array($model, ['classic', 'modern', 'terminal', 'elite', 'corporate'], true)) { echo json_encode(['ok' => false]); exit; }
         setSetting($pdo, 'sub_view_model', $model);
         echo json_encode(['ok' => true, 'model' => $model]); exit;
     }
     if ($api === 'set_sub_theme') {
         $model = (string)($body['model'] ?? 'modern');
         $themesByModel = [
-            'classic'  => ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'],
-            'modern'   => ['black', 'white', 'red', 'purple', 'ocean', 'emerald'],
-            'terminal' => ['green', 'amber', 'blue', 'red', 'white', 'cyan'],
-            'elite'    => ['gold', 'platinum', 'rosegold', 'emerald', 'sapphire', 'onyx'],
+            'classic'   => ['default', 'ocean', 'emerald', 'ember', 'gold', 'crimson'],
+            'modern'    => ['black', 'white', 'red', 'purple', 'ocean', 'emerald'],
+            'terminal'  => ['green', 'amber', 'blue', 'red', 'white', 'cyan'],
+            'elite'     => ['gold', 'platinum', 'rosegold', 'emerald', 'sapphire', 'onyx'],
+            'corporate' => ['blue', 'teal', 'emerald', 'rose'],
         ];
         if (!isset($themesByModel[$model])) { echo json_encode(['ok' => false]); exit; }
         $theme = (string)($body['theme'] ?? '');
@@ -1127,11 +1128,12 @@ $hasCustomPassword = getSetting($pdo, 'webpanel_password_hash', '') !== '';
 $showAccountBtn = getSetting($pdo, 'show_account_btn', 'on') === 'on';
 $publicModeOn   = getSetting($pdo, 'public_mode', '0') === '1';
 $currentSubModel = getSetting($pdo, 'sub_view_model', 'modern');
-if (!in_array($currentSubModel, ['classic', 'modern', 'terminal', 'elite'], true)) $currentSubModel = 'modern';
+if (!in_array($currentSubModel, ['classic', 'modern', 'terminal', 'elite', 'corporate'], true)) $currentSubModel = 'modern';
 $currentSubThemeClassic = getSetting($pdo, 'sub_view_theme_classic', 'default');
 $currentSubThemeModern  = getSetting($pdo, 'sub_view_theme_modern', 'black');
 $currentSubThemeTerminal = getSetting($pdo, 'sub_view_theme_terminal', 'green');
 $currentSubThemeElite = getSetting($pdo, 'sub_view_theme_elite', 'gold');
+$currentSubThemeCorporate = getSetting($pdo, 'sub_view_theme_corporate', 'blue');
 
 $fjStatus       = getSetting($pdo, 'fj_status', 'off');
 $fjChannel      = getSetting($pdo, 'fj_channel', '');
@@ -1172,6 +1174,69 @@ body[data-panel-theme="ocean"]{ --bg-grad1:#050b12; --bg-grad2:#020608; --blob1:
 body[data-panel-theme="emerald"]{ --bg-grad1:#050f0a; --bg-grad2:#020a06; --blob1:#059669; --blob2:#10b981; --blob3:#34d399; }
 body[data-panel-theme="sunset"]{ --bg-grad1:#120a06; --bg-grad2:#0a0503; --blob1:#f97316; --blob2:#f43f5e; --blob3:#fbbf24; }
 body[data-panel-theme="mono"]{ --bg-grad1:#0a0a0c; --bg-grad2:#050506; --blob1:#8b8b96; --blob2:#5c5c66; --blob3:#3a3a42; }
+body[data-panel-theme="light"]{
+    --bg-grad1:#eef1f8; --bg-grad2:#ffffff;
+    --blob1:#2563eb; --blob2:#14b8a6; --blob3:#ec4899;
+    --glass-1: rgba(30,41,80,.04); --glass-2: rgba(30,41,80,.07); --glass-3: rgba(30,41,80,.11);
+    --glass-border: rgba(30,41,80,.14); --glass-border-strong: rgba(30,41,80,.32);
+    --glass-shadow: 0 4px 16px rgba(30,41,80,.05), 0 20px 50px rgba(30,41,80,.07);
+    --text: #151a2e; --muted: #5b6472; --muted-2: #7c8494;
+}
+/* «کورپوریت روشن»: کل رنگ‌بندی این پنل روی فرض متن روشن روی زمینه‌ی تیره طراحی
+   شده — خیلی از باکس‌های ورودی/چیپ‌ها و متن‌های تاکیدی مستقیم رنگ ثابت دارن، نه
+   متغیر. برای همین این موارد رو جدا برای تم روشن بازنویسی می‌کنیم تا به‌جای تیره
+   روی تیره یا پاستیلی روی سفید، خوانا بمونن. */
+body[data-panel-theme="light"] h1,
+body[data-panel-theme="light"] .sidebar-brand{
+    background: linear-gradient(90deg, #1d4ed8, #7c3aed 45%, #db2777 85%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+body[data-panel-theme="light"] .row,
+body[data-panel-theme="light"] .pool .rows .row,
+body[data-panel-theme="light"] .label-input,
+body[data-panel-theme="light"] .search-box input,
+body[data-panel-theme="light"] input,
+body[data-panel-theme="light"] textarea,
+body[data-panel-theme="light"] .url-box,
+body[data-panel-theme="light"] .log-box,
+body[data-panel-theme="light"] .role-switch,
+body[data-panel-theme="light"] table.data-table code{
+    background: rgba(30,41,80,.05);
+}
+body[data-panel-theme="light"] .label-input:focus,
+body[data-panel-theme="light"] input:focus,
+body[data-panel-theme="light"] textarea:focus{
+    background: rgba(30,41,80,.08);
+}
+body[data-panel-theme="light"] .row.dragover{ background:rgba(37,99,235,.08); border-color:#2563eb; box-shadow:0 0 0 4px rgba(37,99,235,.15); }
+body[data-panel-theme="light"] .bg-blob{ mix-blend-mode:multiply; }
+body[data-panel-theme="light"] .bg1{ opacity:.07; }
+body[data-panel-theme="light"] .bg2{ opacity:.06; }
+body[data-panel-theme="light"] .bg3{ opacity:.05; }
+body[data-panel-theme="light"] .grain{ opacity:.15; }
+body[data-panel-theme="light"] .toast{ background:rgba(21,26,46,.94); color:#f4f6fb; }
+body[data-panel-theme="light"] .dash-card.accent-blue .dash-num{ color:#1d4ed8; }
+body[data-panel-theme="light"] .dash-card.accent-purple .dash-num{ color:#7c3aed; }
+body[data-panel-theme="light"] .dash-card.accent-green .dash-num{ color:#0f9d63; }
+body[data-panel-theme="light"] .dash-card.accent-pink .dash-num{ color:#db2777; }
+body[data-panel-theme="light"] .dash-card.accent-orange .dash-num{ color:#b45309; }
+body[data-panel-theme="light"] .dash-subtitle,
+body[data-panel-theme="light"] .box h3,
+body[data-panel-theme="light"] .label-group h3{ color:#7c3aed; }
+body[data-panel-theme="light"] .stat-pill{ color:#1d4ed8; }
+body[data-panel-theme="light"] .stat-pill.warn{ color:#b45309; }
+body[data-panel-theme="light"] .chip .role-tag.rt-admin{ color:#1d4ed8; }
+body[data-panel-theme="light"] .chip .role-tag.rt-supadmin{ color:#7c3aed; }
+body[data-panel-theme="light"] .label-reset:hover{ color:#151a2e; border-color:#2563eb; }
+body[data-panel-theme="light"] .sub-link, body[data-panel-theme="light"] .badge{ color:#1d4ed8; }
+body[data-panel-theme="light"] .pill.on{ color:#0f9d63; }
+body[data-panel-theme="light"] .mini-btn.mb-success{ color:#0f9d63; }
+body[data-panel-theme="light"] .mini-btn.mb-primary{ color:#1d4ed8; }
+body[data-panel-theme="light"] .logout:hover{ color:#151a2e; }
+body[data-panel-theme="light"] .tab-btn:hover{ color:#151a2e; }
+body[data-panel-theme="light"] .tab-btn.active{ color:#151a2e; }
+body[data-panel-theme="light"] .pill.off{ color:#c0264a; }
+body[data-panel-theme="light"] .mini-btn.mb-danger{ color:#c0264a; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 ::selection{ background: var(--purple); color:#fff; }
 html{ scroll-behavior:smooth; }
@@ -1215,6 +1280,7 @@ body.input-active .bg-blob{ animation-play-state: paused; }
 .pt-emerald{ background:linear-gradient(135deg, #059669, #34d399); }
 .pt-sunset{ background:linear-gradient(135deg, #f97316, #f43f5e); }
 .pt-mono{ background:linear-gradient(135deg, #8b8b96, #3a3a42); }
+.pt-light{ background:linear-gradient(135deg, #2563eb, #ec4899); border:1px solid rgba(30,41,80,.18); }
 @keyframes drift { 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(-46px,32px) scale(1.12); } }
 .grain{ position:fixed; inset:0; z-index:-1; pointer-events:none;
     background-image:radial-gradient(rgba(255,255,255,.035) 1px, transparent 1px);
@@ -1430,7 +1496,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
 @media (max-width: 640px) { body{ padding:16px; } .label-key{ flex-basis:100%; } }
 </style>
 </head>
-<?php $currentPanelTheme = getSetting($pdo, 'panel_theme', 'default'); if (!in_array($currentPanelTheme, ['default','ocean','emerald','sunset','mono'], true)) $currentPanelTheme = 'default'; ?>
+<?php $currentPanelTheme = getSetting($pdo, 'panel_theme', 'default'); if (!in_array($currentPanelTheme, ['default','ocean','emerald','sunset','mono','light'], true)) $currentPanelTheme = 'default'; ?>
 <body data-panel-theme="<?= htmlspecialchars($currentPanelTheme, ENT_QUOTES, 'UTF-8') ?>">
 <div class="bg-blob bg1"></div><div class="bg-blob bg2"></div><div class="bg-blob bg3"></div>
 <div class="grain"></div>
@@ -1473,6 +1539,7 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
             <div class="panel-theme-dot pt-emerald" data-theme="emerald" title="زمرد"></div>
             <div class="panel-theme-dot pt-sunset" data-theme="sunset" title="غروب"></div>
             <div class="panel-theme-dot pt-mono" data-theme="mono" title="مونوکروم"></div>
+            <div class="panel-theme-dot pt-light" data-theme="light" title="کورپوریت روشن"></div>
         </div>
         <a class="logout" href="?logout=1">خروج ⏻</a>
     </div>
@@ -1656,14 +1723,14 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
 <div class="menu-section" id="section-sub_theme">
     <div class="glass box">
         <h3>🧩 مدل صفحه‌ی «مشاهده در وب»</h3>
-        <div class="hint" style="margin-top:0;">چهار مدل کاملاً متفاوت (نه فقط رنگ) در دسترسه. هرکدوم رو انتخاب کنی، تم‌های رنگی مخصوص همون مدل زیرش نشون داده می‌شه.</div>
+        <div class="hint" style="margin-top:0;">پنج مدل کاملاً متفاوت (نه فقط رنگ) در دسترسه. هرکدوم رو انتخاب کنی، تم‌های رنگی مخصوص همون مدل زیرش نشون داده می‌شه.</div>
         <div class="theme-grid" id="model-grid" style="grid-template-columns:repeat(2, 1fr);">
-            <?php $modelList = ['classic' => ['کلاسیک', '#a855f7', '#d946ef', '#050107'], 'modern' => ['مدرن (اپ‌گرید + ذره‌ای)', '#4ff0ff', '#a06bff', '#07070b'], 'terminal' => ['ترمینال (هکری)', '#00ff66', '#4fff7a', '#020603'], 'elite' => ['الیت (لاکچری/خاص)', '#c9a876', '#e8cf9a', '#0a0906']]; ?>
-            <?php foreach ($modelList as $mKey => [$mTitle, $mc1, $mc2, $mbg]): $mActive = ($currentSubModel === $mKey); ?>
+            <?php $modelList = ['classic' => ['کلاسیک', '#a855f7', '#d946ef', '#050107'], 'modern' => ['مدرن (اپ‌گرید + ذره‌ای)', '#4ff0ff', '#a06bff', '#07070b'], 'terminal' => ['ترمینال (هکری)', '#00ff66', '#4fff7a', '#020603'], 'elite' => ['الیت (لاکچری/خاص)', '#c9a876', '#e8cf9a', '#0a0906'], 'corporate' => ['کورپوریت روشن', '#2563eb', '#14b8a6', '#f4f6fb']]; ?>
+            <?php foreach ($modelList as $mKey => [$mTitle, $mc1, $mc2, $mbg]): $mActive = ($currentSubModel === $mKey); $mLight = ($mKey === 'corporate'); ?>
             <div class="theme-card <?= $mActive ? 'active' : '' ?>" id="model-card-<?= $mKey ?>" onclick="setSubModel('<?= $mKey ?>')" style="background:<?= $mbg ?>; border-color:<?= $mActive ? $mc2 : 'var(--glass-border)' ?>;">
                 <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $mc1 ?>, <?= $mc2 ?>);"></div>
-                <div class="theme-title"><?= $mTitle ?></div>
-                <div class="theme-check"><?= $mActive ? '✅ فعال' : '' ?></div>
+                <div class="theme-title" style="<?= $mLight ? 'color:#151a2e;' : '' ?>"><?= $mTitle ?></div>
+                <div class="theme-check" style="<?= $mLight ? 'color:#0f9d63;' : '' ?>"><?= $mActive ? '✅ فعال' : '' ?></div>
             </div>
             <?php endforeach; ?>
         </div>
@@ -1760,6 +1827,28 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
                 <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
                 <div class="theme-title"><?= $title ?></div>
                 <div class="theme-check"><?= $isActive ? '✅ فعال' : '' ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="glass box" id="theme-group-corporate" style="<?= $currentSubModel === 'corporate' ? '' : 'display:none' ?>">
+        <h3>🎨 تم رنگی مدل کورپوریت روشن</h3>
+        <div class="theme-grid" id="theme-grid-corporate">
+            <?php
+            $themeListCorporate = [
+                'blue'    => ['آبی',       '#2563eb', '#14b8a6', '#f4f6fb'],
+                'teal'    => ['فیروزه‌ای', '#0f766e', '#14b8a6', '#f3f8f7'],
+                'emerald' => ['زمرد',      '#059669', '#10b981', '#f3f9f4'],
+                'rose'    => ['رز',         '#be185d', '#ec4899', '#faf4f6'],
+            ];
+            foreach ($themeListCorporate as $key => [$title, $c1, $c2, $bg]):
+                $isActive = ($currentSubThemeCorporate === $key);
+            ?>
+            <div class="theme-card <?= $isActive ? 'active' : '' ?>" id="theme-card-corporate-<?= $key ?>" onclick="setSubTheme('corporate', '<?= $key ?>')" style="background:<?= $bg ?>; border-color:<?= $isActive ? $c2 : 'var(--glass-border)' ?>;">
+                <div class="theme-swatch" style="background:linear-gradient(135deg, <?= $c1 ?>, <?= $c2 ?>);"></div>
+                <div class="theme-title" style="color:#151a2e;"><?= $title ?></div>
+                <div class="theme-check" style="color:#0f9d63;"><?= $isActive ? '✅ فعال' : '' ?></div>
             </div>
             <?php endforeach; ?>
         </div>
@@ -2853,6 +2942,7 @@ async function setSubModel(model) {
         document.getElementById('theme-group-modern').style.display = model === 'modern' ? '' : 'none';
         document.getElementById('theme-group-terminal').style.display = model === 'terminal' ? '' : 'none';
         document.getElementById('theme-group-elite').style.display = model === 'elite' ? '' : 'none';
+        document.getElementById('theme-group-corporate').style.display = model === 'corporate' ? '' : 'none';
         showToast('🧩 مدل صفحه‌ی «مشاهده در وب» عوض شد.', 'success');
     } else {
         showToast('❌ خطا در ذخیره‌ی مدل.', 'error');
