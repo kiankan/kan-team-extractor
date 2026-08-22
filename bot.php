@@ -1426,11 +1426,71 @@ function sendMessage($chatId, string $text, ?array $replyMarkup = null): void {
 }
 
 function editMessageText($chatId, int $messageId, string $text, ?array $replyMarkup = null): void {
-    $text = applyPremiumToText($text); 
+    $text = applyPremiumToText($text);
     $postData = ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'HTML', 'disable_web_page_preview' => true];
     if ($replyMarkup) $postData['reply_markup'] = json_encode($replyMarkup);
     $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/editMessageText");
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 15]);
+    curl_exec($ch);
+    curl_close($ch);
+}
+
+// برخلاف vless/vmess/... که خودشون یه لینک تکی‌ان و توی چت به‌صورت متن قابل کپی
+// مفیدن، متن خام کانفیگ وایرگارد یه فایل .conf کامله؛ برای همین به‌جای فرستادن
+// توی <code>، به‌عنوان attachment واقعی (sendDocument) با پسوند .conf ارسال می‌شه
+// تا مستقیم توی اپ وایرگارد قابل ایمپورت باشه.
+function sendConfigFile($chatId, string $baseName, string $content, string $caption = ''): void {
+    $safeName = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $baseName);
+    $safeName = trim($safeName, '_');
+    if ($safeName === '') $safeName = 'wireguard';
+    $safeName = substr($safeName, 0, 40);
+
+    $tmpFile = tempnam(sys_get_temp_dir(), 'wg_');
+    if ($tmpFile === false) return;
+    $confFile = $tmpFile . '.conf';
+    if (!rename($tmpFile, $confFile)) { @unlink($tmpFile); return; }
+    file_put_contents($confFile, $content);
+
+    $postData = ['chat_id' => $chatId, 'document' => new CURLFile(realpath($confFile), 'application/octet-stream', $safeName . '.conf')];
+    if ($caption !== '') {
+        $postData['caption']    = applyPremiumToText($caption);
+        $postData['parse_mode'] = 'HTML';
+    }
+
+    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendDocument");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 30]);
+    curl_exec($ch);
+    curl_close($ch);
+
+    @unlink($confFile);
+}
+
+// وقتی استخراج یه ساب کاملاً صفر کانفیگ برگردونه (یعنی یا سرور بلاک کرده یا فرمت
+// پاسخش رو نمی‌شناسیم، مثلاً یه پروتکل/فرمت جدید)، به‌جای اینکه فقط وقتی خودِ
+// ادمین دستی تست می‌کنه اطلاعات فنی رو ببینه، مستقیم و همون لحظه به ADMIN_ID
+// اطلاع می‌دیم تا در جریان فرمت‌های پشتیبانی‌نشده باشه.
+function notifyAdminZeroConfigExtraction($chatId, string $userMention, string $subUrl, array $debugInfo): void {
+    if (!defined('ADMIN_ID') || !ADMIN_ID) return;
+
+    $msg = "🆕 <b>فرمت ساب ناشناخته / استخراج ناموفق!</b>\n\n";
+    $msg .= "استخراج این ساب ۰ کانفیگ برگردوند (احتمالاً پروتکل یا فرمت جدیدیه که ربات هنوز پشتیبانی نمی‌کنه):\n\n";
+    $msg .= "👤 کاربر: {$userMention} (<code>{$chatId}</code>)\n";
+    $msg .= "🔗 لینک: <code>" . htmlspecialchars($subUrl, ENT_QUOTES, 'UTF-8') . "</code>\n";
+    $msg .= "کد HTTP: <code>" . ($debugInfo['http_code'] ?? '-') . "</code>\n";
+    if (!empty($debugInfo['curl_error'])) {
+        $msg .= "خطای cURL: <code>" . htmlspecialchars((string)$debugInfo['curl_error'], ENT_QUOTES, 'UTF-8') . "</code>\n";
+    }
+    if (!empty($debugInfo['snippet'])) {
+        $msg .= "نمونه پاسخ سرور:\n<code>" . htmlspecialchars((string)$debugInfo['snippet'], ENT_QUOTES, 'UTF-8') . "</code>";
+    }
+
+    $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendMessage");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => ['chat_id' => ADMIN_ID, 'text' => $msg, 'parse_mode' => 'HTML'],
+        CURLOPT_TIMEOUT        => 8,
+    ]);
     curl_exec($ch);
     curl_close($ch);
 }
@@ -2269,6 +2329,9 @@ try {
                                 $errMsg .= "نمونه پاسخ سرور:\n<code>" . htmlspecialchars((string)$d['snippet'], ENT_QUOTES, 'UTF-8') . "</code>";
                             }
                         }
+                        if (!empty($subData['debug'])) {
+                            notifyAdminZeroConfigExtraction($chatId, $userMention, $text, $subData['debug']);
+                        }
                     }
                     sendMessage($chatId, $errMsg);
                 }
@@ -2995,6 +3058,9 @@ try {
                             if (is_array($subData) && ($subData['error'] ?? '') === 'html_page') {
                                 editMessageText($chatId, $messageId, "🌐 <b>این یک ساب مستقیم نیست!</b>\n\nلینک ثبت‌شده یک صفحه‌ی وب (Web Sub) است، نه یک لینک خام؛ بنابراین امکان بروزرسانی کانفیگ‌ها وجود ندارد.\n\n✅ لطفاً یک لینک ساب مستقیم (Raw) جدید ارسال کنید.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]]);
                             } else {
+                                if (is_array($subData) && !empty($subData['debug'])) {
+                                    notifyAdminZeroConfigExtraction($chatId, $userMention, $subUrl, $subData['debug']);
+                                }
                                 editMessageText($chatId, $messageId, "❌ خطا در بروزرسانی.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'danger', 'btn_back')]]]);
                             }
                         }
@@ -3050,20 +3116,45 @@ try {
                     if ($data === 'get_extracted_configs') {
                         $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
                         if (is_array($subData) && !empty($subData['configs_list'])) {
-                            $messages    = [];
-                            $currentText = "✅ <b>کانفیگ‌های شما:</b>\n\n";
+                            $textConfigs = [];
+                            $wgConfigs   = [];
                             foreach ($subData['configs_list'] as $c) {
-                                $nameWithFlag = addFlagToConfigName($c['name']);
-                                $block = "📌 نام: {$nameWithFlag}\n📡 پروتکل: " . strtolower($c['protocol']) . "\n<code>{$c['raw']}</code>\n<b>team kan</b>\n\n";
-                                if (mb_strlen($currentText . $block, 'UTF-8') > 3900) { $messages[] = $currentText; $currentText = ""; }
-                                $currentText .= $block;
+                                if (strtolower($c['protocol']) === 'wireguard') {
+                                    $wgConfigs[] = $c;
+                                } else {
+                                    $textConfigs[] = $c;
+                                }
                             }
-                            if (!empty($currentText)) $messages[] = $currentText;
-                            foreach ($messages as $idx => $msg) {
-                                $kb = ($idx == count($messages) - 1) ? ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]] : null;
-                                sendMessage($chatId, $msg, $kb);
-                                usleep(250000);
+
+                            if (!empty($textConfigs)) {
+                                $messages    = [];
+                                $currentText = "✅ <b>کانفیگ‌های شما:</b>\n\n";
+                                foreach ($textConfigs as $c) {
+                                    $nameWithFlag = addFlagToConfigName($c['name']);
+                                    $block = "📌 نام: {$nameWithFlag}\n📡 پروتکل: " . strtolower($c['protocol']) . "\n<code>{$c['raw']}</code>\n<b>team kan</b>\n\n";
+                                    if (mb_strlen($currentText . $block, 'UTF-8') > 3900) { $messages[] = $currentText; $currentText = ""; }
+                                    $currentText .= $block;
+                                }
+                                if (!empty($currentText)) $messages[] = $currentText;
+                                foreach ($messages as $msg) {
+                                    sendMessage($chatId, $msg);
+                                    usleep(250000);
+                                }
                             }
+
+                            if (!empty($wgConfigs)) {
+                                // کانفیگ وایرگارد یه لینک تکی نیست؛ چون خودش یه فایل .conf کامله،
+                                // به‌جای متن توی چت، مستقیم به‌عنوان فایل قابل‌ایمپورت فرستاده می‌شه.
+                                sendMessage($chatId, "📎 کانفیگ‌(های) وایرگارد به‌صورت فایل .conf ارسال می‌شن:");
+                                foreach ($wgConfigs as $c) {
+                                    $nameWithFlag = addFlagToConfigName($c['name']);
+                                    $caption = "📌 {$nameWithFlag}\n<b>team kan</b>";
+                                    sendConfigFile($chatId, $c['name'] ?: ($c['server'] ?: 'wireguard'), $c['raw'], $caption);
+                                    usleep(250000);
+                                }
+                            }
+
+                            sendMessage($chatId, "✅ ارسال کانفیگ‌ها تمام شد.", ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]]);
                         } else {
                             $emptyText = (is_array($subData) && ($subData['error'] ?? '') === 'html_page')
                                 ? "🌐 این لینک یک صفحه‌ی وب است، نه ساب مستقیم؛ کانفیگی برای دریافت وجود ندارد."
