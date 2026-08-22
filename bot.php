@@ -841,16 +841,42 @@ try {
     exit;
 }
 
+// خیلی از کلیدها (report_status، fj_status، public_mode و ...) توی یک درخواست چند
+// بار جدا خونده می‌شن (مثلاً هر بار sendTopicReport صدا زده بشه)؛ چون تنظیمات وسط
+// یک وب‌هوک عوض نمی‌شن (مگر همین درخواست خودش setSetting بزنه، که کش رو هم به‌روز
+// می‌کنیم)، با یک کش سطح-درخواست از کوئری‌های تکراری جلوگیری می‌کنیم. برگردوندن
+// آرایه با & لازمه تا getSetting/setSetting به یک static واحد (نه دو کپی جدا) دسترسی داشته باشن.
+function &settingsCacheRef(): array {
+    static $cache = [];
+    return $cache;
+}
+
 function getSetting($pdo, $key, $default = '') {
+    $cache = &settingsCacheRef();
+    if (array_key_exists($key, $cache)) {
+        $val = $cache[$key];
+        return $val !== false ? $val : $default;
+    }
     $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
     $stmt->execute([$key]);
     $val = $stmt->fetchColumn();
+    $cache[$key] = $val;
     return $val !== false ? $val : $default;
 }
 
 function setSetting($pdo, $key, $value) {
     $stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
     $stmt->execute([$key, $value, $value]);
+    $cache = &settingsCacheRef();
+    $cache[$key] = $value;
+}
+
+// وقتی بازیابی بکاپ مستقیم روی جدول settings می‌نویسه (importDbBackupFile، بدون
+// عبور از setSetting)، کش این درخواست باید کامل خالی بشه وگرنه خوندن‌های بعدیِ
+// همین درخواست مقدار قدیمیِ قبل از ایمپورت رو می‌دیدن، نه چیزی که تازه بازیابی شده.
+function resetSettingsCache(): void {
+    $cache = &settingsCacheRef();
+    $cache = [];
 }
 
 // توکن کرون مخصوص همین نصب: از روی BOT_TOKEN شما ساخته می‌شود (نه یک مقدار
@@ -1260,6 +1286,14 @@ function formatBytes($bytes, $precision = 2) {
 
 function getPremiumTextEmojis() {
     global $pdo;
+    // این تابع رو applyPremiumToText صدا می‌زنه که خودش پشتِ sendMessage/editMessageText
+    // هست — یعنی به‌ازای هر پیامی که ربات توی یک درخواست می‌فرسته (که می‌تونه چندین‌تا
+    // باشه، مثلاً لیست کانفیگ‌ها) بدون کش، یک کوئری دیتابیس جدا و یک array_merge روی
+    // آرایه‌ی ۴۰۰+ عضوی تکرار می‌شد. چون این تنظیم وسط یک درخواست تغییر نمی‌کنه، فقط
+    // بار اول محاسبه و بقیه‌ی صداها از همون نتیجه استفاده می‌کنن.
+    static $cache = null;
+    if ($cache !== null) return $cache;
+
     $defaults = [
         '🚀'=>'', '✅'=>'', '❌'=>'', '📊'=>'', '📦'=>'', '🔋'=>'', '⏳'=>'', '🟢'=>'',
         '🔴'=>'', '👤'=>'', '⚙️'=>'', '🔍'=>'', '🗂'=>'', '👨‍💼'=>'', '📢'=>'', '🔐'=>'',
@@ -1325,7 +1359,8 @@ function getPremiumTextEmojis() {
     if (!$pdo) return $defaults;
     $saved = json_decode(getSetting($pdo, 'premium_text_emojis', '{}'), true);
     if (!is_array($saved)) $saved = [];
-    return array_merge($defaults, $saved);
+    $cache = array_merge($defaults, $saved);
+    return $cache;
 }
 
 function applyPremiumToText($text) {
@@ -2212,12 +2247,17 @@ try {
         }
     }
 
+    // یک کوئری واحد به‌جای دو کوئری جدا برای is_admin و is_blocked روی جدول
+    // users؛ چون در چت خصوصی (تنها حالتی که این ربات پیام کاربر می‌گیرد)
+    // chatId و userId همیشه یکی‌ان. نتیجه در $userRow نگه داشته می‌شود تا
+    // هندلر /start پایین‌تر هم بتونه همین ردیف رو دوباره استفاده کنه.
+    $userRow = null;
     if (!$isAdmin) {
-        $stmt = $pdo->prepare("SELECT is_admin FROM users WHERE user_id = ?");
-        $stmt->execute([$userId]);
-        $uRole = $stmt->fetch();
-        if ($uRole && ($uRole['is_admin'] ?? 0) == 1) { 
-            $isAdmin = true; 
+        $stmt = $pdo->prepare("SELECT is_admin, is_blocked FROM users WHERE user_id = ?");
+        $stmt->execute([$chatId]);
+        $userRow = $stmt->fetch();
+        if ($userRow && ($userRow['is_admin'] ?? 0) == 1) {
+            $isAdmin = true;
         }
     }
 
@@ -2225,10 +2265,7 @@ try {
     $startText = "به ربات استخراج سریع سابسکریپشن خوش آمدید 🚀\nاز منوی شیشه‌ای زیر استفاده کنید 👇";
 
     if (!$isAdmin) {
-        $stmt = $pdo->prepare("SELECT is_blocked FROM users WHERE user_id = ?");
-        $stmt->execute([$chatId]);
-        $uInfo = $stmt->fetch();
-        if ($uInfo && ($uInfo['is_blocked'] ?? 0) == 1) {
+        if ($userRow && ($userRow['is_blocked'] ?? 0) == 1) {
             if ($message && isset($message['text'])) sendMessage($chatId, "❌ حساب کاربری شما مسدود شده است.");
             exit;
         }
@@ -2311,6 +2348,11 @@ try {
 
                 sendMessage($chatId, "⏳ در حال بررسی و ایمپورت هوشمند بک‌آپ...");
                 $result = importDbBackupFile($pdo, (string)$sqlContent);
+                // این تابع مستقیم روی جدول settings می‌نویسه (نه از طریق setSetting)،
+                // پس کش تنظیمات همین درخواست رو باید خالی کنیم؛ وگرنه خوندن‌های بعدی
+                // (مثلاً همون sendTopicReport چند خط پایین‌تر) مقدار قدیمیِ قبل از
+                // ایمپورت رو می‌بینن، نه چیزی که تازه بازیابی شده.
+                resetSettingsCache();
                 $pdo->prepare("DELETE FROM user_states WHERE user_id = ?")->execute([$chatId]);
 
                 if ($result['valid'] === false) {
@@ -2359,9 +2401,17 @@ try {
         }
 
         if (str_starts_with($text, '/start')) {
-            $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-            $stmt->execute([$chatId]);
-            if (!$stmt->fetch()) {
+            // $userRow از بررسی is_admin/is_blocked بالاتر همین درخواست موجوده، مگر
+            // وقتی isAdmin از طریق ADMIN_ID یا جدول admins ست شده باشه (اونجا اصلاً
+            // کوئری users زده نشده) که در این حالت جدا چک می‌کنیم.
+            if ($userRow !== null) {
+                $existingUser = $userRow;
+            } else {
+                $stmt = $pdo->prepare("SELECT user_id FROM users WHERE user_id = ?");
+                $stmt->execute([$chatId]);
+                $existingUser = $stmt->fetch();
+            }
+            if (!$existingUser) {
                 $pdo->prepare("INSERT INTO users (user_id) VALUES (?)")->execute([$chatId]);
                 sendTopicReport($pdo, "👤 <b>کاربر جدید!</b>\nنام: " . htmlspecialchars($fullName) . "\nآیدی: {$userMention}\nعددی: <code>{$chatId}</code>\nزمان: " . jdate('Y/m/d H:i:s'), 'ورود کاربران 🚪', 'report_join_thread_id');
             }
@@ -3411,8 +3461,20 @@ try {
                         $ipList = array_keys($ips);
                         if (count($ipList) > 0) {
                             $ipText = "🌐 <b>لیست آی‌پی‌ها:</b>\n\n";
+                            // هر gethostbyname() یک کوئری DNS بلاک‌کننده است و می‌تواند
+                            // روی دامنه‌های کند/غیرقابل‌حل چند ثانیه طول بکشد؛ با ده‌ها
+                            // هاست متفاوت در یک ساب، این حلقه می‌توانست کل درخواست
+                            // وبهوک را برای مدت طولانی معلق نگه دارد. با یک سقف زمانیِ
+                            // تجمعی، بعد از رد شدن از حد، بقیه‌ی هاست‌ها بدون resolve
+                            // (فقط به‌صورت دامنه) نمایش داده می‌شوند.
+                            $resolveStart       = microtime(true);
+                            $timeBudgetExceeded = false;
                             foreach ($ipList as $host) {
-                                $resolvedIp = gethostbyname($host);
+                                $resolvedIp = $host;
+                                if (!$timeBudgetExceeded) {
+                                    $resolvedIp = gethostbyname($host);
+                                    if ((microtime(true) - $resolveStart) > 8.0) $timeBudgetExceeded = true;
+                                }
                                 if ($resolvedIp !== $host && filter_var($resolvedIp, FILTER_VALIDATE_IP)) $ipText .= "🔗 دامنه: <code>{$host}</code>\n🟢 آی‌پی: <code>{$resolvedIp}</code>\n\n";
                                 else                                                                        $ipText .= "🟢 آی‌پی/دامنه: <code>{$host}</code>\n\n";
                             }

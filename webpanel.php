@@ -86,15 +86,32 @@ try {
 // ------------------------------------------------------------------
 // توابع پایه تنظیمات
 // ------------------------------------------------------------------
+// خیلی از کلیدها (report_status، fj_status، public_mode و ...) توی بارگذاری یک
+// صفحه چند بار جدا خونده می‌شن؛ چون تنظیمات وسط یک درخواست عوض نمی‌شن (مگر همین
+// درخواست خودش setSetting بزنه، که کش رو هم به‌روز می‌کنیم)، با یک کش سطح-درخواست
+// از کوئری‌های تکراری جلوگیری می‌کنیم. برگردوندن آرایه با & لازمه تا getSetting/
+// setSetting به یک static واحد (نه دو کپی جدا) دسترسی داشته باشن.
+function &settingsCacheRef(): array {
+    static $cache = [];
+    return $cache;
+}
+
 function getSetting(PDO $pdo, string $key, string $default = ''): string {
+    $cache = &settingsCacheRef();
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key] !== null ? $cache[$key] : $default;
+    }
     $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
     $stmt->execute([$key]);
     $val = $stmt->fetchColumn();
+    $cache[$key] = ($val !== false) ? (string)$val : null;
     return $val !== false ? (string)$val : $default;
 }
 function setSetting(PDO $pdo, string $key, string $value): void {
     $stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
     $stmt->execute([$key, $value, $value]);
+    $cache = &settingsCacheRef();
+    $cache[$key] = $value;
 }
 
 const DEFAULT_PANEL_PASSWORD = 'admin';
@@ -865,6 +882,10 @@ if (isset($_GET['api'])) {
     if ($api === 'broadcast') {
         $text = trim((string)($body['text'] ?? ''));
         if ($text === '') { echo json_encode(['ok' => false, 'error' => 'empty']); exit; }
+        // با تعداد زیاد کاربر، این حلقه می‌تونه از max_execution_time پیش‌فرض PHP
+        // بیشتر طول بکشه و وسط کار قطع بشه؛ bot.php این محدودیت رو سراسری غیرفعال
+        // کرده، اینجا هم مخصوص همین درخواست غیرفعالش می‌کنیم.
+        set_time_limit(0);
         $users = $pdo->query("SELECT user_id FROM users WHERE is_blocked = 0")->fetchAll();
         $sent = 0; $failed = 0;
         foreach ($users as $u) {
