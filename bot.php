@@ -61,17 +61,29 @@ class AdvancedSubExtractor {
     }
 
     private function parseAny(string $response): array {
+        // بعضی پنل‌ها متن wg-quick رو مثل بقیه‌ی پروتکل‌ها Base64 می‌کنن؛ اگه توی
+        // متن خام [Interface] پیدا نشد، یه‌بار دیکد امتحان می‌کنیم. کانفیگ‌های
+        // وایرگارد رو merge می‌کنیم نه return مستقیم، چون ممکنه همون ساب علاوه‌بر
+        // بلاک(های) وایرگارد، لینک‌های vless/vmess/... جدا هم داشته باشه.
+        $wgConfigs = [];
         if ($this->isWireguardConf($response)) {
-            $configs = $this->parseWireguardConf($response);
-            if (!empty($configs)) return $configs;
+            $wgConfigs = $this->parseWireguardConf($response);
+        } else {
+            $decoded = $this->safeBase64Decode($response);
+            if ($decoded !== null && $this->isWireguardConf($decoded)) {
+                $wgConfigs = $this->parseWireguardConf($decoded);
+            }
         }
+
         if ($this->isClashYaml($response)) {
-            return $this->parseClashYaml($response);
+            $configs = $this->parseClashYaml($response);
+        } elseif ($this->isSingBoxJson($response)) {
+            $configs = $this->parseSingBoxJson($response);
+        } else {
+            $configs = $this->parseRawOrBase64($response);
         }
-        if ($this->isSingBoxJson($response)) {
-            return $this->parseSingBoxJson($response);
-        }
-        return $this->parseRawOrBase64($response);
+
+        return !empty($wgConfigs) ? array_merge($wgConfigs, $configs) : $configs;
     }
 
     public function getDebugInfo(): array {
@@ -162,9 +174,31 @@ class AdvancedSubExtractor {
         $blocks = preg_split('/(?=^[ \t]*\[Interface\][ \t]*$)/mi', $content);
         if (!$blocks) return [];
 
+        // preg_split دقیقاً از خط [Interface] می‌بره، پس یه کامنت اسمِ سرور که
+        // بلافاصله قبل از [Interface] بلاک بعدی اومده، اشتباهی ته همین بلاک
+        // می‌مونه (نه اول بلاک بعدی که واقعاً بهش تعلق داره). این کامنت‌های
+        // انتهاییِ خالی/کامنت رو از ته هر بلاک جدا کرده و به اول بلاک بعدی منتقل
+        // می‌کنیم تا اسمِ درست به سرور درست بچسبه.
+        for ($i = 0; $i < count($blocks) - 1; $i++) {
+            $lines    = explode("\n", $blocks[$i]);
+            $trailing = [];
+            while (!empty($lines)) {
+                $lastLine = trim(end($lines));
+                if ($lastLine === '' || str_starts_with($lastLine, '#')) {
+                    array_unshift($trailing, array_pop($lines));
+                } else {
+                    break;
+                }
+            }
+            if (!empty($trailing)) {
+                $blocks[$i]     = implode("\n", $lines);
+                $blocks[$i + 1] = implode("\n", $trailing) . "\n" . $blocks[$i + 1];
+            }
+        }
+
         foreach ($blocks as $block) {
             $block = trim($block);
-            if ($block === '' || !preg_match('/^\[Interface\]/i', $block)) continue;
+            if ($block === '' || !preg_match('/^(?:#[^\n]*\n\s*)*\[Interface\]/i', $block)) continue;
 
             $section  = '';
             $iface    = [];
@@ -1448,10 +1482,20 @@ function sendConfigFile($chatId, string $baseName, string $content, string $capt
     if ($safeName === '') $safeName = 'wireguard';
     $safeName = mb_substr($safeName, 0, 60, 'UTF-8');
 
+    // اگه به هر دلیلی (پوشه‌ی temp غیرقابل‌نوشتن و ...) نتونیم فایل بسازیم، به‌جای
+    // سکوت کامل (که باعث می‌شد کاربر نه فایل بگیره نه دکمه‌ی بازگشت رو ببینه)،
+    // حداقل خودِ کانفیگ رو به‌صورت متن با همون کیبورد می‌فرستیم.
     $tmpFile = tempnam(sys_get_temp_dir(), 'wg_');
-    if ($tmpFile === false) return;
+    if ($tmpFile === false) {
+        sendMessage($chatId, ($caption !== '' ? $caption . "\n\n" : '') . "<code>" . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . "</code>", $replyMarkup);
+        return;
+    }
     $confFile = $tmpFile . '.conf';
-    if (!rename($tmpFile, $confFile)) { @unlink($tmpFile); return; }
+    if (!rename($tmpFile, $confFile)) {
+        @unlink($tmpFile);
+        sendMessage($chatId, ($caption !== '' ? $caption . "\n\n" : '') . "<code>" . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . "</code>", $replyMarkup);
+        return;
+    }
     file_put_contents($confFile, $content);
 
     $postData = ['chat_id' => $chatId, 'document' => new CURLFile(realpath($confFile), 'application/octet-stream', $safeName . '.conf')];
@@ -2333,7 +2377,10 @@ try {
                                 $errMsg .= "نمونه پاسخ سرور:\n<code>" . htmlspecialchars((string)$d['snippet'], ENT_QUOTES, 'UTF-8') . "</code>";
                             }
                         }
-                        if (!empty($subData['debug'])) {
+                        // اگه خودِ ادمین داره تست می‌کنه، همین بالا توی $errMsg جزئیات فنی
+                        // رو می‌بینه؛ برای جلوگیری از دوبار فرستادن همون اطلاعات، فقط وقتی
+                        // درخواست‌دهنده ادمین نیست پیام جدا به ADMIN_ID می‌فرستیم.
+                        if (!$isAdmin && !empty($subData['debug'])) {
                             notifyAdminZeroConfigExtraction($chatId, $userMention, $text, $subData['debug']);
                         }
                     }

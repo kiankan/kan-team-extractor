@@ -67,17 +67,29 @@ class AdvancedSubExtractor {
     }
 
     private function parseAny(string $response): array {
+        // بعضی پنل‌ها متن wg-quick رو مثل بقیه‌ی پروتکل‌ها Base64 می‌کنن؛ اگه توی
+        // متن خام [Interface] پیدا نشد، یه‌بار دیکد امتحان می‌کنیم. کانفیگ‌های
+        // وایرگارد رو merge می‌کنیم نه return مستقیم، چون ممکنه همون ساب علاوه‌بر
+        // بلاک(های) وایرگارد، لینک‌های vless/vmess/... جدا هم داشته باشه.
+        $wgConfigs = [];
         if ($this->isWireguardConf($response)) {
-            $configs = $this->parseWireguardConf($response);
-            if (!empty($configs)) return $configs;
+            $wgConfigs = $this->parseWireguardConf($response);
+        } else {
+            $decoded = $this->safeBase64Decode($response);
+            if ($decoded !== null && $this->isWireguardConf($decoded)) {
+                $wgConfigs = $this->parseWireguardConf($decoded);
+            }
         }
+
         if ($this->isClashYaml($response)) {
-            return $this->parseClashYaml($response);
+            $configs = $this->parseClashYaml($response);
+        } elseif ($this->isSingBoxJson($response)) {
+            $configs = $this->parseSingBoxJson($response);
+        } else {
+            $configs = $this->parseRawOrBase64($response);
         }
-        if ($this->isSingBoxJson($response)) {
-            return $this->parseSingBoxJson($response);
-        }
-        return $this->parseRawOrBase64($response);
+
+        return !empty($wgConfigs) ? array_merge($wgConfigs, $configs) : $configs;
     }
 
     public function getDebugInfo(): array {
@@ -168,9 +180,31 @@ class AdvancedSubExtractor {
         $blocks = preg_split('/(?=^[ \t]*\[Interface\][ \t]*$)/mi', $content);
         if (!$blocks) return [];
 
+        // preg_split دقیقاً از خط [Interface] می‌بره، پس یه کامنت اسمِ سرور که
+        // بلافاصله قبل از [Interface] بلاک بعدی اومده، اشتباهی ته همین بلاک
+        // می‌مونه (نه اول بلاک بعدی که واقعاً بهش تعلق داره). این کامنت‌های
+        // انتهاییِ خالی/کامنت رو از ته هر بلاک جدا کرده و به اول بلاک بعدی منتقل
+        // می‌کنیم تا اسمِ درست به سرور درست بچسبه.
+        for ($i = 0; $i < count($blocks) - 1; $i++) {
+            $lines    = explode("\n", $blocks[$i]);
+            $trailing = [];
+            while (!empty($lines)) {
+                $lastLine = trim(end($lines));
+                if ($lastLine === '' || str_starts_with($lastLine, '#')) {
+                    array_unshift($trailing, array_pop($lines));
+                } else {
+                    break;
+                }
+            }
+            if (!empty($trailing)) {
+                $blocks[$i]     = implode("\n", $lines);
+                $blocks[$i + 1] = implode("\n", $trailing) . "\n" . $blocks[$i + 1];
+            }
+        }
+
         foreach ($blocks as $block) {
             $block = trim($block);
-            if ($block === '' || !preg_match('/^\[Interface\]/i', $block)) continue;
+            if ($block === '' || !preg_match('/^(?:#[^\n]*\n\s*)*\[Interface\]/i', $block)) continue;
 
             $section  = '';
             $iface    = [];
