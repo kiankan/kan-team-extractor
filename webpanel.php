@@ -1232,6 +1232,11 @@ body[data-panel-theme="light"] .sub-link, body[data-panel-theme="light"] .badge{
 body[data-panel-theme="light"] .pill.on{ color:#0f9d63; }
 body[data-panel-theme="light"] .mini-btn.mb-success{ color:#0f9d63; }
 body[data-panel-theme="light"] .mini-btn.mb-primary{ color:#1d4ed8; }
+body[data-panel-theme="light"] .logout:hover{ color:#151a2e; }
+body[data-panel-theme="light"] .tab-btn:hover{ color:#151a2e; }
+body[data-panel-theme="light"] .tab-btn.active{ color:#151a2e; }
+body[data-panel-theme="light"] .pill.off{ color:#c0264a; }
+body[data-panel-theme="light"] .mini-btn.mb-danger{ color:#c0264a; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 ::selection{ background: var(--purple); color:#fff; }
 html{ scroll-behavior:smooth; }
