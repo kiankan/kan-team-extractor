@@ -67,6 +67,10 @@ class AdvancedSubExtractor {
     }
 
     private function parseAny(string $response): array {
+        if ($this->isWireguardConf($response)) {
+            $configs = $this->parseWireguardConf($response);
+            if (!empty($configs)) return $configs;
+        }
         if ($this->isClashYaml($response)) {
             return $this->parseClashYaml($response);
         }
@@ -144,6 +148,92 @@ class AdvancedSubExtractor {
             return isset($data[0]['outbounds']) || isset($data[0]['inbounds']) || isset($data[0]['proxies']);
         }
         return isset($data['outbounds']) || isset($data['inbounds']) || isset($data['proxies']);
+    }
+
+    // خیلی از پنل‌های اختصاصی وایرگارد (مثل asan-ps) به جای لیست لینک، مستقیماً
+    // فایل استاندارد wg-quick (بخش‌های [Interface]/[Peer]) رو به‌عنوان بدنه‌ی
+    // ساب برمی‌گردونن؛ این تابع تشخیص می‌ده که پاسخ از این نوعه یا نه.
+    private function isWireguardConf(string $content): bool {
+        return (bool) preg_match('/^\s*\[Interface\]\s*$/mi', $content);
+    }
+
+    // یک یا چند بلاک کامل wg-quick رو (اگه ساب چند سرور رو پشت‌سرهم چسبونده باشه)
+    // پارس می‌کنه و از هر بلاک، Endpoint داخل [Peer] رو برای host/port در میاره.
+    // متن خامِ خودِ بلاک بدون تغییر به‌عنوان raw نگه داشته می‌شه تا مستقیماً به‌شکل
+    // یک فایل .conf معتبر قابل استفاده/دانلود باشه.
+    private function parseWireguardConf(string $content): array {
+        $configs = [];
+        $content = str_replace("\r\n", "\n", $content);
+
+        $blocks = preg_split('/(?=^[ \t]*\[Interface\][ \t]*$)/mi', $content);
+        if (!$blocks) return [];
+
+        foreach ($blocks as $block) {
+            $block = trim($block);
+            if ($block === '' || !preg_match('/^\[Interface\]/i', $block)) continue;
+
+            $section  = '';
+            $iface    = [];
+            $peers    = [];
+            $peer     = [];
+            $comments = [];
+
+            foreach (explode("\n", $block) as $line) {
+                $line = trim($line);
+                if ($line === '') continue;
+
+                if (preg_match('/^#+\s*(.+)$/', $line, $cm)) {
+                    $comments[] = trim($cm[1]);
+                    continue;
+                }
+                if (preg_match('/^\[(Interface|Peer)\]$/i', $line, $sm)) {
+                    if (strcasecmp($section, 'Peer') === 0 && !empty($peer)) {
+                        $peers[] = $peer;
+                        $peer = [];
+                    }
+                    $section = strtolower($sm[1]);
+                    continue;
+                }
+                if (strpos($line, '=') === false) continue;
+
+                [$key, $val] = array_map('trim', explode('=', $line, 2));
+                $key = strtolower($key);
+
+                if ($section === 'interface') {
+                    $iface[$key] = $val;
+                } elseif ($section === 'peer') {
+                    $peer[$key] = $val;
+                }
+            }
+            if (!empty($peer)) $peers[] = $peer;
+
+            if (empty($iface) || empty($peers)) continue;
+
+            $server = '';
+            $port   = '';
+            $endpoint = $peers[0]['endpoint'] ?? '';
+            if ($endpoint !== '' && preg_match('/^(\[[^\]]+\]|[^:\s]+):(\d{1,5})$/', $endpoint, $em)) {
+                $server = trim($em[1], '[]');
+                $port   = $em[2];
+            }
+
+            $name = '';
+            foreach ($comments as $c) {
+                if ($c !== '') { $name = $c; break; }
+            }
+            if ($name === '') {
+                $name = $server !== '' ? $server : 'WireGuard Config';
+            }
+
+            $configs[] = [
+                'name'     => $name,
+                'protocol' => 'WIREGUARD',
+                'raw'      => $block,
+                'server'   => $server,
+                'port'     => $port,
+            ];
+        }
+        return $configs;
     }
 
     private function parseClashYaml(string $content): array {
@@ -458,6 +548,15 @@ class AdvancedSubExtractor {
     public function extractHostPort(string $raw): array {
         $empty = ['host' => '', 'port' => ''];
         if ($raw === '') return $empty;
+
+        // بلاک خامِ wg-quick (خروجی parseWireguardConf) با اسکیم شروع نمی‌شه؛
+        // Endpoint داخل [Peer] رو مستقیم از متن در میاریم.
+        if (preg_match('/^\[Interface\]/i', trim($raw))) {
+            if (preg_match('/^\s*Endpoint\s*=\s*(\[[^\]]+\]|[^:\s]+):(\d{1,5})\s*$/mi', $raw, $em)) {
+                return ['host' => trim($em[1], '[]'), 'port' => $em[2]];
+            }
+            return $empty;
+        }
 
         if (!preg_match('#^([a-z0-9]+)://#i', $raw, $sm)) return $empty;
         $scheme = strtolower($sm[1]);
