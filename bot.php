@@ -2411,24 +2411,36 @@ try {
                 $stmt->execute([$chatId]);
                 $existingUser = $stmt->fetch();
             }
-            if (!$existingUser) {
+            $isNewUser = !$existingUser;
+            if ($isNewUser) {
                 $pdo->prepare("INSERT INTO users (user_id) VALUES (?)")->execute([$chatId]);
-                sendTopicReport($pdo, "👤 <b>کاربر جدید!</b>\nنام: " . htmlspecialchars($fullName) . "\nآیدی: {$userMention}\nعددی: <code>{$chatId}</code>\nزمان: " . jdate('Y/m/d H:i:s'), 'ورود کاربران 🚪', 'report_join_thread_id');
             }
-            sendTopicReport($pdo, "🔄 <b>استارت ربات</b>\nکاربر: {$userMention}\nآیدی: <code>{$chatId}</code>\nزمان: " . jdate('Y/m/d H:i:s'), 'گزارش لحظه‌ای ⏳', 'report_realtime_thread_id');
             $pdo->prepare("DELETE FROM user_states WHERE user_id = ?")->execute([$chatId]);
-            
-            $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendMessage");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'text' => applyPremiumToText('⏳ در حال بارگذاری کیبورد جدید...'), 'reply_markup' => json_encode(['remove_keyboard' => true])], CURLOPT_TIMEOUT => 5]);
-            $res = json_decode((string)curl_exec($ch), true);
-            curl_close($ch);
-            if (!empty($res['result']['message_id'])) {
-                $ch2 = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/deleteMessage");
-                curl_setopt_array($ch2, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'message_id' => $res['result']['message_id']], CURLOPT_TIMEOUT => 5]);
-                curl_exec($ch2); curl_close($ch2);
+
+            // گزارش‌های ادمین به تاپیک، بعد از تلاش برای رسوندن پاسخ واقعی به کاربر
+            // ارسال می‌شن؛ قبلاً قبل از پیام خوش‌آمد بودن و چون هرکدوم یک (یا با ساخت
+            // تاپیک، دو) درخواست شبکه‌ی جداگانه به تلگرامه، سرعتِ پاسخ به کاربر رو با
+            // تأخیرِ متغیر و نامحسوس (بسته به فعال بودن گزارشات و تعداد گروه‌ها) کند
+            // می‌کردن. finally تضمین می‌کنه اگه ساخت کیبورد یا ارسال پاسخ استثنا پرت
+            // کرد، گزارش‌ها باز هم حذف نشن، فقط دیرتر ارسال بشن.
+            try {
+                $ch = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/sendMessage");
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'text' => applyPremiumToText('⏳ در حال بارگذاری کیبورد جدید...'), 'reply_markup' => json_encode(['remove_keyboard' => true])], CURLOPT_TIMEOUT => 5]);
+                $res = json_decode((string)curl_exec($ch), true);
+                curl_close($ch);
+                if (!empty($res['result']['message_id'])) {
+                    $ch2 = curl_init("https://api.telegram.org/bot" . BOT_TOKEN . "/deleteMessage");
+                    curl_setopt_array($ch2, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => ['chat_id' => $chatId, 'message_id' => $res['result']['message_id']], CURLOPT_TIMEOUT => 5]);
+                    curl_exec($ch2); curl_close($ch2);
+                }
+
+                sendMessage($chatId, $startText, getMainInlineMarkup($isAdmin, $pdo));
+            } finally {
+                if ($isNewUser) {
+                    sendTopicReport($pdo, "👤 <b>کاربر جدید!</b>\nنام: " . htmlspecialchars($fullName) . "\nآیدی: {$userMention}\nعددی: <code>{$chatId}</code>\nزمان: " . jdate('Y/m/d H:i:s'), 'ورود کاربران 🚪', 'report_join_thread_id');
+                }
+                sendTopicReport($pdo, "🔄 <b>استارت ربات</b>\nکاربر: {$userMention}\nآیدی: <code>{$chatId}</code>\nزمان: " . jdate('Y/m/d H:i:s'), 'گزارش لحظه‌ای ⏳', 'report_realtime_thread_id');
             }
-            
-            sendMessage($chatId, $startText, getMainInlineMarkup($isAdmin, $pdo));
             exit;
         }
 
@@ -2542,17 +2554,23 @@ try {
                         $resText .= ($i + 1) . ". " . addFlagToConfigName($c['name']) . "\n";
                     }
 
-                    // گزارش لحظه‌ای استخراج به تاپیک گزارشات
-                    sendTopicReport($pdo, "📊 <b>استخراج ساب انجام شد</b>\nکاربر: {$userMention}\nآیدی: <code>{$chatId}</code>\nتعداد کانفیگ: {$subData['total_configs']}\nزمان: " . jdate('Y/m/d H:i:s'), 'گزارش استخراج 📊', 'report_extract_thread_id');
+                    // گزارش لحظه‌ای استخراج به تاپیک گزارشات، بعد از رسیدن نتیجه به خود
+                    // کاربر ارسال می‌شه (نه قبلش)، چون این یک درخواست شبکه‌ی اضافه به
+                    // تلگرامه که قبلاً پاسخِ کاربر رو بی‌دلیل معطل می‌کرد. finally تضمین
+                    // می‌کنه که اگه ذخیره‌سازی/ساخت کیبورد/ارسال پاسخ استثنا پرت کرد
+                    // (مثلاً قطعی موقت دیتابیس)، گزارش باز هم حذف نشه، فقط دیرتر بره.
+                    try {
+                        $viewToken = generateExtractionToken();
+                        saveExtraction($pdo, $viewToken, $chatId, $text, $subData, $headerInfo);
+                        $viewUrl = getWebRootUrl() . "/sub_view.php?id=" . $viewToken;
 
-                    $viewToken = generateExtractionToken();
-                    saveExtraction($pdo, $viewToken, $chatId, $text, $subData, $headerInfo);
-                    $viewUrl = getWebRootUrl() . "/sub_view.php?id=" . $viewToken;
-
-                    $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false, $viewUrl);
-                    $statePayload = json_encode(['sub_url' => $text, 'time' => time(), 'view_token' => $viewToken]);
-                    $pdo->prepare("INSERT INTO user_states (user_id, state, data) VALUES (?, 'HAS_SUB_DATA', ?) ON DUPLICATE KEY UPDATE state='HAS_SUB_DATA', data=?")->execute([$chatId, $statePayload, $statePayload]);
-                    sendMessage($chatId, $resText, $kb);
+                        $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false, $viewUrl);
+                        $statePayload = json_encode(['sub_url' => $text, 'time' => time(), 'view_token' => $viewToken]);
+                        $pdo->prepare("INSERT INTO user_states (user_id, state, data) VALUES (?, 'HAS_SUB_DATA', ?) ON DUPLICATE KEY UPDATE state='HAS_SUB_DATA', data=?")->execute([$chatId, $statePayload, $statePayload]);
+                        sendMessage($chatId, $resText, $kb);
+                    } finally {
+                        sendTopicReport($pdo, "📊 <b>استخراج ساب انجام شد</b>\nکاربر: {$userMention}\nآیدی: <code>{$chatId}</code>\nتعداد کانفیگ: {$subData['total_configs']}\nزمان: " . jdate('Y/m/d H:i:s'), 'گزارش استخراج 📊', 'report_extract_thread_id');
+                    }
                 } else {
                     if (($subData['error'] ?? '') === 'html_page') {
                         $errMsg = "🌐 <b>این یک ساب مستقیم نیست!</b>\n\nلینکی که فرستادید یک صفحه‌ی وب (Web Sub) است، نه یک لینک خام (Raw) ساب‌اسکریپشن؛ به همین دلیل ربات نمی‌تواند از آن کانفیگ استخراج کند.\n\n✅ لطفاً لینک ساب مستقیم (معمولاً از داخل پنل یا اپلیکیشن VPN) را ارسال کنید.";
