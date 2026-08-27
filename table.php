@@ -69,6 +69,23 @@ try {
         `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
+    // آمار روزانه‌ی ناشناس برای داشبورد پنل وب: فقط عدد (تعداد استخراج، مجموع
+    // کانفیگ، شمار پروتکل)، بدون هیچ لینک ساب/user_id/محتوای کانفیگ. برخلاف
+    // جدول extractions که ۵ دقیقه بعد پاک می‌شه (برای امنیت)، این جدول چون هیچ
+    // داده‌ی حساسی نداره می‌مونه تا نمودار روند تاریخی معنا داشته باشه.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `stats_daily` (
+        `stat_date` DATE PRIMARY KEY,
+        `extractions_count` INT DEFAULT 0,
+        `total_configs_sum` BIGINT DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `stats_daily_protocols` (
+        `stat_date` DATE NOT NULL,
+        `protocol` VARCHAR(20) NOT NULL,
+        `configs_count` INT DEFAULT 0,
+        PRIMARY KEY (`stat_date`, `protocol`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
     // ارتقای دیتابیس‌های قدیمی: اگر جدول users از نسخه قبلی (با ستون‌های
     // first_name/username) مانده باشد، ستون‌های جدید را اضافه کن تا خطا ندهد
     $neededCols = [
@@ -98,7 +115,7 @@ try {
     if (basename($_SERVER['PHP_SELF']) === 'table.php') {
         echo "<div style='font-family:tahoma; direction:rtl; text-align:center; margin-top:50px;'>
                 <h2 style='color:green;'>✅ جدول‌ها با موفقیت ساخته یا به‌روزرسانی شدند!</h2>
-                <p style='color:#555; font-size:13px;'>جداول: users, user_states, settings, admins, extractions, backup_imports</p>
+                <p style='color:#555; font-size:13px;'>جداول: users, user_states, settings, admins, extractions, backup_imports, stats_daily, stats_daily_protocols</p>
               </div>";
     }
 } catch (PDOException $e) {

@@ -919,6 +919,67 @@ if (isset($_GET['api'])) {
         ]); exit;
     }
 
+    // ================= نمودارهای داشبورد =================
+    // نکته: کاربران جدید از users.joined_at میان (که هیچ‌وقت پاک نمی‌شه)، ولی
+    // تعداد استخراج/پروتکل از stats_daily* میان — جدول extractions اصلی هر ۵
+    // دقیقه برای امنیت پاک می‌شه، پس نمی‌شه مستقیم ازش روند تاریخی ساخت.
+    if ($api === 'dashboard_charts') {
+        $days = 30;
+        // «امروز» رو از خودِ MySQL می‌گیریم (نه از PHP's DateTime/timezone)، چون
+        // stat_date با CURDATE() و joined_at با CURRENT_TIMESTAMP توسط MySQL
+        // نوشته می‌شن؛ اگه فقط PHP رو مبنا می‌گرفتیم و timezone پیش‌فرض PHP این
+        // سرور با timezone سرور MySQL یکی نبود، مرز روزها جابه‌جا می‌شد (مثلاً
+        // چند ساعت از داده‌ی امروز زیر برچسب دیروز می‌رفت). این‌طوری کل محاسبه‌ی
+        // بازه فقط روی رشته‌ی تاریخ (بدون بخش ساعت) انجام می‌شه، پس timezone اصلاً وارد بازی نمی‌شه.
+        $todayDt   = new DateTime((string)$pdo->query("SELECT CURDATE()")->fetchColumn());
+        $startDate = (clone $todayDt)->modify('-' . ($days - 1) . ' days')->format('Y-m-d');
+
+        $newUsersByDate = [];
+        $stmt = $pdo->prepare("SELECT DATE(joined_at) AS d, COUNT(*) AS c FROM users WHERE joined_at >= ? GROUP BY DATE(joined_at)");
+        $stmt->execute([$startDate]);
+        foreach ($stmt->fetchAll() as $row) { $newUsersByDate[$row['d']] = (int)$row['c']; }
+
+        $extractionsByDate = [];
+        $stmt = $pdo->prepare("SELECT stat_date, extractions_count FROM stats_daily WHERE stat_date >= ?");
+        $stmt->execute([$startDate]);
+        foreach ($stmt->fetchAll() as $row) { $extractionsByDate[$row['stat_date']] = (int)$row['extractions_count']; }
+
+        $newUsers = []; $extractions = [];
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d     = (clone $todayDt)->modify("-{$i} days")->format('Y-m-d');
+            $label = jdate('m/d', strtotime($d));
+            $newUsers[]    = ['date' => $d, 'label' => $label, 'count' => $newUsersByDate[$d] ?? 0];
+            $extractions[] = ['date' => $d, 'label' => $label, 'count' => $extractionsByDate[$d] ?? 0];
+        }
+
+        $protocolLabels = ['vless' => 'VLESS', 'vmess' => 'VMess', 'trojan' => 'Trojan', 'shadowsocks' => 'Shadowsocks', 'hysteria2' => 'Hysteria2', 'tuic' => 'TUIC', 'wireguard' => 'WireGuard', 'custom' => 'Custom', 'json' => 'JSON', 'other' => 'سایر'];
+        $protoRows = $pdo->query("SELECT protocol, SUM(configs_count) AS c FROM stats_daily_protocols GROUP BY protocol ORDER BY c DESC")->fetchAll();
+        $protocols = [];
+        $otherSum  = 0;
+        foreach ($protoRows as $i => $row) {
+            $count = (int)$row['c'];
+            if ($count <= 0) continue;
+            if ($i < 5) {
+                $protocols[] = ['protocol' => $protocolLabels[$row['protocol']] ?? $row['protocol'], 'count' => $count];
+            } else {
+                $otherSum += $count;
+            }
+        }
+        // اگه پروتکل «other» خودش جزو ۵ تای اول باشه، برچسبش هم «سایر»ه؛ به‌جای
+        // اضافه کردنِ یه ردیفِ «سایر» دومِ جدا برای overflow (که تو نمودار دو تا
+        // ردیف هم‌نام و گیج‌کننده می‌سازه)، به همون ردیف موجود اضافه می‌شه.
+        if ($otherSum > 0) {
+            $mergedIntoExisting = false;
+            foreach ($protocols as &$p) {
+                if ($p['protocol'] === 'سایر') { $p['count'] += $otherSum; $mergedIntoExisting = true; break; }
+            }
+            unset($p);
+            if (!$mergedIntoExisting) $protocols[] = ['protocol' => 'سایر', 'count' => $otherSum];
+        }
+
+        echo json_encode(['ok' => true, 'new_users' => $newUsers, 'extractions' => $extractions, 'protocols' => $protocols]); exit;
+    }
+
     // ================= رمز عبور پنل =================
     if ($api === 'change_password') {
         $current = (string)($body['current'] ?? '');
@@ -1188,6 +1249,11 @@ if (!in_array($initialTab, $ALLOWED_TABS, true)) $initialTab = 'dashboard';
     --text: #f5f5f7; --muted: #98a0b3; --muted-2: #6b7386;
     --radius-lg: 26px; --radius-md: 18px; --radius-sm: 12px;
     --ease: cubic-bezier(.22,1,.36,1);
+    /* رنگ‌های نمودار داشبورد: جدا از رنگ‌های تزئینی بالا، از یک پالت categorical
+       اعتبارسنجی‌شده (CVD-safe) برای شناسایی مطمئن سری‌ها استفاده می‌کنن. */
+    --chart-series-1: #3987e5; --chart-series-2: #d95926; --chart-series-3: #199e70;
+    --chart-series-4: #c98500; --chart-series-5: #d55181; --chart-series-other: #6b7386;
+    --chart-grid: rgba(255,255,255,.08); --chart-surface: var(--bg-grad2);
 }
 /* تم پنل مدیریت: فقط رنگ حباب‌های تزئینی پس‌زمینه و ته‌رنگ گرادینت اصلی رو عوض می‌کنه،
    نه رنگ‌های معنایی کارت‌های داشبورد (blue/purple/pink/green/...) که همه‌جا استفاده می‌شن. */
@@ -1202,6 +1268,11 @@ body[data-panel-theme="light"]{
     --glass-border: rgba(30,41,80,.14); --glass-border-strong: rgba(30,41,80,.32);
     --glass-shadow: 0 4px 16px rgba(30,41,80,.05), 0 20px 50px rgba(30,41,80,.07);
     --text: #151a2e; --muted: #5b6472; --muted-2: #7c8494;
+    /* همون پالت categorical، پله‌ی روشن‌ترش برای سطح سفید (هر دو حالت جدا
+       اعتبارسنجی‌شده‌ن، نه یه فلیپ خودکار روی رنگ تیره) */
+    --chart-series-1: #2a78d6; --chart-series-2: #eb6834; --chart-series-3: #1baf7a;
+    --chart-series-4: #eda100; --chart-series-5: #e87ba4; --chart-series-other: #898781;
+    --chart-grid: rgba(30,41,80,.10);
 }
 /* «کورپوریت روشن»: کل رنگ‌بندی این پنل روی فرض متن روشن روی زمینه‌ی تیره طراحی
    شده — خیلی از باکس‌های ورودی/چیپ‌ها و متن‌های تاکیدی مستقیم رنگ ثابت دارن، نه
@@ -1356,6 +1427,34 @@ h1 { font-size: 23px; margin-bottom: 4px; font-weight:800; letter-spacing:-.4px;
 .dash-card.accent-orange .dash-num{ color:#ffcf8a; }
 .dash-subtitle { font-size:13px; color:#d8b4fe; font-weight:800; margin:22px 0 12px; display:flex; align-items:center; gap:8px; }
 .dash-subtitle:first-child { margin-top:0; }
+
+/* ---------------- نمودارهای داشبورد ---------------- */
+.chart-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px,1fr)); gap:14px; margin-bottom:16px; }
+.chart-box { padding:20px; }
+.chart-box .chart-title { font-size:13.5px; font-weight:800; color:var(--text); margin-bottom:2px; }
+.chart-box .chart-sub { font-size:11.5px; color:var(--muted); margin-bottom:14px; }
+.chart-box .chart-empty { font-size:12.5px; color:var(--muted); text-align:center; padding:30px 0; }
+.line-chart-wrap { position:relative; }
+.line-chart-wrap svg { display:block; width:100%; height:120px; overflow:visible; }
+.line-chart-wrap .lc-grid { stroke:var(--chart-grid); stroke-width:1; }
+.line-chart-wrap .lc-area { opacity:.12; }
+.line-chart-wrap .lc-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.line-chart-wrap .lc-dot { fill:var(--chart-surface); stroke-width:2; r:4; }
+.line-chart-wrap .lc-hover-line { stroke:var(--muted-2); stroke-width:1; opacity:0; pointer-events:none; }
+.line-chart-wrap .lc-hover-dot { r:5; stroke:var(--chart-surface); stroke-width:2; opacity:0; pointer-events:none; }
+.line-chart-wrap .lc-hit { fill:transparent; cursor:crosshair; }
+.chart-tooltip {
+    position:absolute; pointer-events:none; opacity:0; transition:opacity .12s ease;
+    background:var(--glass-3); border:1px solid var(--glass-border); border-radius:10px;
+    padding:6px 10px; font-size:11.5px; color:var(--text); white-space:nowrap; transform:translate(-50%,-115%);
+    box-shadow:0 10px 24px rgba(0,0,0,.3); z-index:5;
+}
+.proto-bar-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.proto-bar-row:last-child { margin-bottom:0; }
+.proto-bar-label { flex:0 0 96px; font-size:12px; color:var(--muted); font-weight:600; text-align:left; direction:ltr; }
+.proto-bar-track { flex:1; height:14px; border-radius:7px; background:var(--glass-1); overflow:hidden; }
+.proto-bar-fill { height:100%; border-radius:7px; min-width:3px; transition:width .4s var(--ease); }
+.proto-bar-value { flex:0 0 auto; font-size:12px; font-weight:800; color:var(--text); min-width:34px; text-align:left; direction:ltr; }
 
 .backup-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
 .file-btn-wrap { position:relative; overflow:hidden; display:inline-block; }
@@ -1585,6 +1684,25 @@ table.data-table code { background:rgba(0,0,0,.3); padding:2px 8px; border-radiu
         <div class="glass dash-card accent-purple"><div class="dash-icon">👮‍♂️</div><div class="dash-num" id="d-total-admins">—</div><div class="dash-label">مدیران</div></div>
         <div class="glass dash-card accent-green"><div class="dash-icon">⏱</div><div class="dash-num" id="d-ping">—</div><div class="dash-label">پینگ ربات (ms)</div></div>
         <div class="glass dash-card accent-orange"><div class="dash-icon">🤖</div><div class="dash-num" id="d-bot-status" style="font-size:16px;">—</div><div class="dash-label">وضعیت اتصال به تلگرام</div></div>
+    </div>
+
+    <div class="dash-subtitle">📈 روند فعالیت (۳۰ روز اخیر)</div>
+    <div class="chart-grid">
+        <div class="glass chart-box">
+            <div class="chart-title">👥 کاربران جدید در روز</div>
+            <div class="chart-sub">تعداد کاربری که برای اولین بار ربات را استارت کرده‌اند</div>
+            <div class="line-chart-wrap" id="chart-new-users"></div>
+        </div>
+        <div class="glass chart-box">
+            <div class="chart-title">📦 تعداد استخراج در روز</div>
+            <div class="chart-sub">هر بار که یک لینک ساب جدید با موفقیت استخراج شده</div>
+            <div class="line-chart-wrap" id="chart-extractions"></div>
+        </div>
+    </div>
+
+    <div class="dash-subtitle">🔹 توزیع پروتکل‌ها (کل زمان)</div>
+    <div class="glass chart-box" id="chart-protocols-wrap">
+        <div id="chart-protocols"></div>
     </div>
 
     <div class="glass box">
@@ -2737,6 +2855,94 @@ async function loadBotStats() {
 function loadDashboard() {
     renderDashboard();
     loadBotStats();
+    loadDashboardCharts();
+}
+
+// ---------------- نمودارهای داشبورد ----------------
+async function loadDashboardCharts() {
+    try {
+        const data = await apiGet('dashboard_charts');
+        if (!data.ok) return;
+        renderLineChart(document.getElementById('chart-new-users'), data.new_users, 'var(--chart-series-1)');
+        renderLineChart(document.getElementById('chart-extractions'), data.extractions, 'var(--chart-series-2)');
+        renderProtocolBars(document.getElementById('chart-protocols'), data.protocols);
+    } catch (e) { /* داشبورد بدون این نمودارها هم قابل استفاده‌ست، ساکت رد می‌شیم */ }
+}
+
+function renderLineChart(container, points, colorVar) {
+    if (!container) return;
+    if (!points || !points.length || points.every(p => p.count === 0)) {
+        container.innerHTML = '<div class="chart-empty">هنوز داده‌ای برای نمایش نیست</div>';
+        return;
+    }
+
+    const W = 600, H = 120, padX = 8, padTop = 18, padBottom = 10;
+    const max = Math.max(1, ...points.map(p => p.count));
+    const n = points.length;
+    const xAt = i => padX + (i * (W - padX * 2)) / Math.max(1, n - 1);
+    const yAt = v => H - padBottom - (v / max) * (H - padTop - padBottom);
+
+    const coords = points.map((p, i) => [xAt(i), yAt(p.count)]);
+    const linePath = coords.map((c, i) => (i === 0 ? 'M' : 'L') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+    const areaPath = linePath + ` L${coords[n - 1][0].toFixed(1)},${H - padBottom} L${coords[0][0].toFixed(1)},${H - padBottom} Z`;
+    const last = coords[n - 1];
+    const lastVal = points[n - 1].count;
+
+    container.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+            <line class="lc-grid" x1="${padX}" y1="${H - padBottom}" x2="${W - padX}" y2="${H - padBottom}"></line>
+            <path class="lc-area" d="${areaPath}" fill="${colorVar}"></path>
+            <path class="lc-line" d="${linePath}" stroke="${colorVar}"></path>
+            <circle class="lc-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" stroke="${colorVar}"></circle>
+            <text x="${(last[0] - 4).toFixed(1)}" y="${(last[1] - 10).toFixed(1)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--text)">${toFa(lastVal)}</text>
+            <line class="lc-hover-line" x1="0" y1="${padTop}" x2="0" y2="${H - padBottom}"></line>
+            <circle class="lc-hover-dot" cx="0" cy="0" fill="${colorVar}"></circle>
+            <rect class="lc-hit" x="0" y="0" width="${W}" height="${H}"></rect>
+        </svg>
+        <div class="chart-tooltip"></div>
+    `;
+
+    const svg = container.querySelector('svg');
+    const hoverLine = container.querySelector('.lc-hover-line');
+    const hoverDot = container.querySelector('.lc-hover-dot');
+    const hit = container.querySelector('.lc-hit');
+    const tooltip = container.querySelector('.chart-tooltip');
+
+    hit.addEventListener('mousemove', (ev) => {
+        const rect = svg.getBoundingClientRect();
+        const relX = ((ev.clientX - rect.left) / rect.width) * W;
+        let idx = Math.round(((relX - padX) / (W - padX * 2)) * (n - 1));
+        idx = Math.max(0, Math.min(n - 1, idx));
+        const [cx, cy] = coords[idx];
+        hoverLine.setAttribute('x1', cx.toFixed(1)); hoverLine.setAttribute('x2', cx.toFixed(1)); hoverLine.style.opacity = 1;
+        hoverDot.setAttribute('cx', cx.toFixed(1)); hoverDot.setAttribute('cy', cy.toFixed(1)); hoverDot.style.opacity = 1;
+        tooltip.textContent = (points[idx].label || points[idx].date) + ' — ' + toFa(points[idx].count);
+        tooltip.style.left = ((cx / W) * 100) + '%';
+        tooltip.style.top = ((cy / H) * 100) + '%';
+        tooltip.style.opacity = 1;
+    });
+    hit.addEventListener('mouseleave', () => {
+        hoverLine.style.opacity = 0; hoverDot.style.opacity = 0; tooltip.style.opacity = 0;
+    });
+}
+
+function renderProtocolBars(container, protocols) {
+    if (!container) return;
+    if (!protocols || !protocols.length) {
+        container.innerHTML = '<div class="chart-empty">هنوز هیچ استخراجی ثبت نشده</div>';
+        return;
+    }
+    const colors = ['var(--chart-series-1)', 'var(--chart-series-2)', 'var(--chart-series-3)', 'var(--chart-series-4)', 'var(--chart-series-5)'];
+    const max = Math.max(...protocols.map(p => p.count));
+    container.innerHTML = protocols.map((p, i) => {
+        const color = (p.protocol === 'سایر') ? 'var(--chart-series-other)' : (colors[i] || 'var(--chart-series-other)');
+        const pct = Math.max(2, Math.round((p.count / max) * 100));
+        return `<div class="proto-bar-row">
+            <div class="proto-bar-label">${p.protocol}</div>
+            <div class="proto-bar-track"><div class="proto-bar-fill" style="width:${pct}%; background:${color};"></div></div>
+            <div class="proto-bar-value">${toFa(p.count)}</div>
+        </div>`;
+    }).join('');
 }
 
 // ---------------- قفل کانال ----------------
