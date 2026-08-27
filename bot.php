@@ -1525,6 +1525,409 @@ function checkHostHttpGet(string $url) {
     return $resp;
 }
 
+// ====================================================
+// تست سرعت واقعی VLESS (Mbps واقعی، نه فقط پینگ)
+// ====================================================
+// برخلاف checkHostTcpTest بالا (که فقط باز بودن پورت رو از نودهای خارجی
+// چک می‌کنه)، این بخش یک پروکسی واقعی (xray-core) روی همین سرور بالا میاره،
+// از طریق خودِ کانفیگ VLESS بهش وصل می‌شه، و سرعت دانلود/آپلود واقعی رو
+// اندازه می‌گیره. عدد نهایی «سرعت از سرور ما تا این کانفیگ»ه، نه سرعتِ
+// واقعیِ یک کاربر داخل ایران (مگر اینکه خودِ این سرور داخل ایران باشه).
+
+function xrayBinaryPath(): string {
+    return __DIR__ . '/xray_core/xray';
+}
+
+function isXrayInstalled(): bool {
+    $p = xrayBinaryPath();
+    return is_file($p) && is_executable($p);
+}
+
+// دانلود و نصب خودکار آخرین نسخه‌ی رسمی Xray-core از گیت‌هاب. فقط با تایید
+// صریح ادمین صدا زده می‌شه (نه به‌صورت خودکار)، چون یه باینری خارجی دانلود
+// و روی سرور اجرا می‌کنه.
+function installXrayBinary(): array {
+    $arch = php_uname('m');
+    if ($arch === 'x86_64' || $arch === 'amd64') {
+        $assetName = 'Xray-linux-64.zip';
+    } elseif ($arch === 'aarch64' || $arch === 'arm64') {
+        $assetName = 'Xray-linux-arm64-v8a.zip';
+    } else {
+        return ['ok' => false, 'error' => "معماری سرور («{$arch}») پشتیبانی نمی‌شه؛ فقط x86_64 و arm64."];
+    }
+
+    $ch = curl_init('https://api.github.com/repos/XTLS/Xray-core/releases/latest');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['User-Agent: kan-team-extractor', 'Accept: application/vnd.github+json'],
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT        => 20,
+    ]);
+    $releaseRaw = curl_exec($ch);
+    curl_close($ch);
+    $release = json_decode((string)$releaseRaw, true);
+    if (!is_array($release) || empty($release['assets'])) {
+        return ['ok' => false, 'error' => 'دریافت اطلاعات آخرین نسخه از گیت‌هاب ناموفق بود.'];
+    }
+
+    $downloadUrl = null;
+    foreach ($release['assets'] as $asset) {
+        if (($asset['name'] ?? '') === $assetName) { $downloadUrl = $asset['browser_download_url'] ?? null; break; }
+    }
+    if (!$downloadUrl) {
+        return ['ok' => false, 'error' => "فایل «{$assetName}» توی آخرین نسخه پیدا نشد."];
+    }
+
+    $zipFile = sys_get_temp_dir() . '/xray_dl_' . bin2hex(random_bytes(4)) . '.zip';
+    $extractDir = sys_get_temp_dir() . '/xray_extract_' . bin2hex(random_bytes(4));
+
+    try {
+        $ch = curl_init($downloadUrl);
+        $fp = fopen($zipFile, 'w');
+        if (!$fp) return ['ok' => false, 'error' => 'ساخت فایل موقت برای دانلود ممکن نشد.'];
+        curl_setopt_array($ch, [
+            CURLOPT_FILE           => $fp,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT        => 90,
+            CURLOPT_HTTPHEADER     => ['User-Agent: kan-team-extractor'],
+        ]);
+        $ok = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+
+        if (!$ok || $httpCode !== 200 || !file_exists($zipFile) || filesize($zipFile) < 1000) {
+            return ['ok' => false, 'error' => "دانلود باینری ناموفق بود (HTTP {$httpCode})."];
+        }
+
+        if (!mkdir($extractDir, 0755, true) && !is_dir($extractDir)) {
+            return ['ok' => false, 'error' => 'ساخت پوشه‌ی موقت استخراج ممکن نشد.'];
+        }
+
+        $extracted = false;
+        if (class_exists('ZipArchive')) {
+            $zip = new ZipArchive();
+            if ($zip->open($zipFile) === true) {
+                $zip->extractTo($extractDir);
+                $zip->close();
+                $extracted = true;
+            }
+        }
+        if (!$extracted && function_exists('shell_exec')) {
+            shell_exec('unzip -o ' . escapeshellarg($zipFile) . ' -d ' . escapeshellarg($extractDir) . ' 2>&1');
+            $extracted = file_exists($extractDir . '/xray');
+        }
+        if (!$extracted) {
+            return ['ok' => false, 'error' => 'استخراج فایل zip ممکن نشد (نه پسوند zip فعاله، نه دستور unzip در دسترسه).'];
+        }
+
+        $extractedBin = $extractDir . '/xray';
+        if (!is_file($extractedBin)) {
+            return ['ok' => false, 'error' => 'فایل اجرایی xray داخل بسته‌ی دانلودشده پیدا نشد.'];
+        }
+
+        $targetDir = dirname(xrayBinaryPath());
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+            return ['ok' => false, 'error' => 'ساخت پوشه‌ی نصب xray ممکن نشد.'];
+        }
+        // rename() اگه پوشه‌ی موقت (sys_get_temp_dir) و پوشه‌ی نصب xray روی دو
+        // فایل‌سیستم/mount جدا باشن با EXDEV شکست می‌خوره؛ در اون حالت به جای
+        // گزارش خطا برای یه نصب کاملاً موفق، copy+unlink رو امتحان می‌کنیم.
+        if (!@rename($extractedBin, xrayBinaryPath())) {
+            if (!@copy($extractedBin, xrayBinaryPath())) {
+                return ['ok' => false, 'error' => 'جابه‌جایی فایل اجرایی به مسیر نصب ممکن نشد.'];
+            }
+            @unlink($extractedBin);
+        }
+        chmod(xrayBinaryPath(), 0755);
+
+        $version = function_exists('shell_exec') ? trim((string)shell_exec(escapeshellarg(xrayBinaryPath()) . ' version 2>&1')) : null;
+        return ['ok' => true, 'version' => $version];
+    } finally {
+        if (file_exists($zipFile)) @unlink($zipFile);
+        if (is_dir($extractDir)) removeDirRecursive($extractDir);
+    }
+}
+
+// حذف بازگشتیِ یه پوشه‌ی موقت؛ برخلاف حذفِ تک‌سطحیِ قبلی، اگه بسته‌ی دانلودی
+// (zip) یه پوشه‌ی تودرتو هم توش باشه (نه فقط فایل‌های flat)، باز هم کامل پاک می‌شه.
+function removeDirRecursive(string $dir): void {
+    $items = @scandir($dir) ?: [];
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') continue;
+        $path = $dir . '/' . $item;
+        if (is_dir($path)) removeDirRecursive($path);
+        else @unlink($path);
+    }
+    @rmdir($dir);
+}
+
+// یه vless:// رو به outbound قابل‌فهم برای xray-core تبدیل می‌کنه. فقط
+// ترکیب‌های واقعاً رایج پشتیبانی می‌شن (network: tcp/ws/grpc، security:
+// none/tls/reality)؛ برای بقیه (quic, xhttp, ...) null برمی‌گرده تا به‌جای
+// ساختن یه کانفیگ نادرست/گمراه‌کننده، صادقانه بگیم پشتیبانی نمی‌شه.
+function parseVlessUriForXray(string $uri): ?array {
+    if (!preg_match('#^vless://#i', $uri)) return null;
+    $parts = parse_url($uri);
+    if (!$parts || empty($parts['host']) || empty($parts['user']) || empty($parts['port'])) return null;
+
+    $uuid = urldecode($parts['user']);
+    $address = $parts['host'];
+    $port = (int)$parts['port'];
+    parse_str($parts['query'] ?? '', $q);
+
+    // (string) صریحه چون parse_str() برای سینتکس آرایه‌ای کوئری (مثل type[]=ws)
+    // یه array برمی‌گردونه؛ strtolower() مستقیم روی آرایه در PHP8 خطای فاتال
+    // (TypeError) می‌ده. با کست، به‌جاش رشته‌ی "Array" می‌شه که طبیعتاً توی
+    // in_array زیرش رد می‌شه و null برمی‌گرده (رفتار امن «پشتیبانی نمی‌شه»).
+    $network  = strtolower((string)($q['type'] ?? 'tcp'));
+    $security = strtolower((string)($q['security'] ?? 'none'));
+    if (!in_array($network, ['tcp', 'ws', 'grpc'], true)) return null;
+    if (!in_array($security, ['none', 'tls', 'reality'], true)) return null;
+
+    // flow (مثل xtls-rprx-vision) فقط با network=tcp و security=tls/reality معتبره؛
+    // بعضی ساب‌سازها flow رو حتی روی ws/grpc/security=none هم می‌ذارن (اشتباهاً)،
+    // که اگه بی‌قید به xray داده بشه، xray کلاً از اجرا شدن امتناع می‌کنه. اینجا
+    // فقط توی ترکیب معتبرش اعمال می‌شه، نه اینکه کل تست رو خراب کنه.
+    $user = ['id' => $uuid, 'encryption' => 'none'];
+    if (!empty($q['flow']) && $network === 'tcp' && $security !== 'none') $user['flow'] = $q['flow'];
+
+    $streamSettings = ['network' => $network, 'security' => $security];
+
+    if ($security === 'tls') {
+        // allowInsecure از خودِ لینک خونده می‌شه (نه همیشه false)؛ خیلی از
+        // کانفیگ‌های واقعی روی سرور با گواهیِ self-signed این پارامتر رو ست
+        // می‌کنن و بدونش هندشیک TLS رد می‌شه، در حالی که خودِ کانفیگ سالمه.
+        $allowInsecure = in_array(strtolower((string)($q['allowInsecure'] ?? $q['insecure'] ?? '0')), ['1', 'true'], true);
+        $streamSettings['tlsSettings'] = array_filter([
+            'serverName'    => $q['sni'] ?? ($q['host'] ?? $address),
+            'fingerprint'   => $q['fp'] ?? null,
+            'allowInsecure' => $allowInsecure,
+            'alpn'          => !empty($q['alpn']) ? explode(',', $q['alpn']) : null,
+        ], fn($v) => $v !== null);
+    } elseif ($security === 'reality') {
+        if (empty($q['pbk'])) return null; // ریالیتی بدون public key معتبر نیست
+        $streamSettings['realitySettings'] = array_filter([
+            'serverName'  => $q['sni'] ?? $address,
+            'fingerprint' => $q['fp'] ?? 'chrome',
+            'publicKey'   => $q['pbk'],
+            'shortId'     => $q['sid'] ?? '',
+            'spiderX'     => $q['spx'] ?? '',
+        ], fn($v) => $v !== null);
+    }
+
+    if ($network === 'ws') {
+        $streamSettings['wsSettings'] = [
+            'path'    => $q['path'] ?? '/',
+            'headers' => ['Host' => $q['host'] ?? $address],
+        ];
+    } elseif ($network === 'grpc') {
+        $streamSettings['grpcSettings'] = [
+            'serviceName' => $q['serviceName'] ?? '',
+            'multiMode'   => (($q['mode'] ?? '') === 'multi'),
+        ];
+    }
+
+    return [
+        'address' => $address,
+        'port'    => $port,
+        'outbound' => [
+            'protocol' => 'vless',
+            'settings' => [
+                'vnext' => [['address' => $address, 'port' => $port, 'users' => [$user]]],
+            ],
+            'streamSettings' => $streamSettings,
+        ],
+    ];
+}
+
+// یک xray واقعی رو با inbound سوکس محلی + outbound کانفیگ داده‌شده بالا
+// میاره، از طریقش دانلود/آپلود واقعی انجام می‌ده و سرعت رو اندازه می‌گیره.
+// finally تضمین می‌کنه پروسه‌ی xray و فایل کانفیگ موقت، چه موفق چه ناموفق،
+// همیشه پاک‌سازی بشن (وگرنه پروسه‌ها و پورت‌ها رو سر سرور جا می‌ذاره).
+function runXraySpeedTest(array $outbound, int $timeoutSeconds = 20): array {
+    if (!isXrayInstalled()) return ['ok' => false, 'error' => 'xray نصب نیست.'];
+
+    // تا ۲ بار امتحان می‌کنیم: پورت محلی با «بایند و سریع بستن» رزرو می‌شه که
+    // یه فاصله‌ی زمانی کوچیک تا بایند واقعیِ xray داره؛ اگه یه پروسه‌ی دیگه
+    // دقیقاً همون لحظه پورت رو قاپید (یا سرور شلوغ بود)، به‌جای شکست قطعی،
+    // یه بار دیگه با پورت جدید امتحان می‌کنیم.
+    $attempt = null;
+    for ($try = 0; $try < 2; $try++) {
+        $attempt = startXrayInstance($outbound);
+        if ($attempt['ready']) break;
+        cleanupXrayInstance($attempt);
+    }
+
+    if (!$attempt['ready']) {
+        $err = $attempt['error'] ?? 'خطای نامشخص';
+        cleanupXrayInstance($attempt);
+        return ['ok' => false, 'error' => 'xray بالا نیومد یا زود متوقف شد: ' . $err];
+    }
+
+    try {
+        $proxy = "socks5h://127.0.0.1:{$attempt['localPort']}";
+
+        // --- تست دانلود ---
+        $downMbps = null; $downErr = null;
+        $ch = curl_init('https://speed.cloudflare.com/__down?bytes=8000000');
+        curl_setopt_array($ch, [
+            CURLOPT_PROXY          => $proxy,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT        => $timeoutSeconds,
+        ]);
+        $t0 = microtime(true);
+        $res = curl_exec($ch);
+        $elapsed = microtime(true) - $t0;
+        if ($res === false) {
+            $downErr = curl_error($ch);
+        } else {
+            $bytes = (float)curl_getinfo($ch, CURLINFO_SIZE_DOWNLOAD);
+            if ($bytes > 0 && $elapsed > 0) $downMbps = round(($bytes * 8) / $elapsed / 1000000, 2);
+        }
+        curl_close($ch);
+
+        // --- تست آپلود ---
+        $upMbps = null; $upErr = null;
+        $payload = random_bytes(4000000);
+        $ch = curl_init('https://speed.cloudflare.com/__up');
+        curl_setopt_array($ch, [
+            CURLOPT_PROXY          => $proxy,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT        => $timeoutSeconds,
+        ]);
+        $t0 = microtime(true);
+        $res = curl_exec($ch);
+        $elapsed = microtime(true) - $t0;
+        if ($res === false) {
+            $upErr = curl_error($ch);
+        } else if ($elapsed > 0) {
+            $upMbps = round((strlen($payload) * 8) / $elapsed / 1000000, 2);
+        }
+        curl_close($ch);
+        unset($payload);
+
+        if ($downMbps === null && $upMbps === null) {
+            return ['ok' => false, 'error' => 'اتصال از طریق این کانفیگ برقرار نشد: ' . ($downErr ?: $upErr ?: 'خطای نامشخص')];
+        }
+
+        return ['ok' => true, 'download_mbps' => $downMbps, 'upload_mbps' => $upMbps];
+    } finally {
+        cleanupXrayInstance($attempt);
+    }
+}
+
+// یک xray واقعی رو با inbound سوکس محلی + outbound داده‌شده اجرا می‌کنه و صبر
+// می‌کنه پورت واقعاً باز بشه (یا خودِ xray زودتر از کار بیفته). خروجی همیشه
+// یه آرایه با کلید 'ready' برمی‌گردونه که با cleanupXrayInstance() جفت می‌شه.
+function startXrayInstance(array $outbound): array {
+    $localPort = random_int(20000, 60000);
+    $sock = @stream_socket_server("tcp://127.0.0.1:{$localPort}", $errno, $errstr);
+    if (!$sock) return ['ready' => false, 'error' => 'پورت محلی آزاد پیدا نشد.', 'proc' => null, 'pipes' => [], 'configFile' => null, 'stderrFile' => null, 'localPort' => $localPort];
+    fclose($sock);
+
+    $config = [
+        'log'       => ['loglevel' => 'warning'],
+        'inbounds'  => [['listen' => '127.0.0.1', 'port' => $localPort, 'protocol' => 'socks', 'settings' => ['auth' => 'noauth', 'udp' => true]]],
+        'outbounds' => [$outbound],
+    ];
+    $configFile = sys_get_temp_dir() . '/xray_cfg_' . bin2hex(random_bytes(4)) . '.json';
+    // این فایل UUID/کلید reality واقعیِ کانفیگ رو داره؛ با umask محدود *قبل* از
+    // نوشتن، همون لحظه‌ی ساختِ فایل با mode 0600 ساخته می‌شه، نه این‌که اول
+    // world-readable نوشته بشه و بعد chmod بشه (که یه پنجره‌ی ناامن باقی می‌ذاشت).
+    $oldUmask = umask(0077);
+    file_put_contents($configFile, json_encode($config, JSON_UNESCAPED_SLASHES));
+    umask($oldUmask);
+
+    // هم stdout هم stderr مستقیم به فایل ریدایرکت می‌شن (نه pipe)؛ چون تست
+    // سرعت چند ثانیه طول می‌کشه و اگه کسی حین اجرا از pipe نخونه، به محض پر
+    // شدن بافر کرنلش (~64KB)، خودِ xray روی write() گیر می‌کنه و کل تست/تونل
+    // رو معلق نگه می‌داره. با فایل، این محدودیت اصلاً وجود نداره.
+    $stderrFile = sys_get_temp_dir() . '/xray_err_' . bin2hex(random_bytes(4)) . '.log';
+    $descriptors = [0 => ['pipe', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', $stderrFile, 'w']];
+    $proc = proc_open([xrayBinaryPath(), 'run', '-c', $configFile], $descriptors, $pipes);
+    if (!is_resource($proc)) {
+        return ['ready' => false, 'error' => 'اجرای xray ممکن نشد.', 'proc' => null, 'pipes' => [], 'configFile' => $configFile, 'stderrFile' => $stderrFile, 'localPort' => $localPort];
+    }
+    fclose($pipes[0]);
+
+    // به‌جای یه sleep ثابت (که هم روی سرور شلوغ ممکنه کم باشه، هم اگه پورت
+    // محلی توسط پروسه‌ی دیگه‌ای قاپیده شده باشه وقت تلف می‌کنه)، واقعاً پول
+    // می‌کنیم تا یا پورت واقعاً باز بشه، یا خودِ xray زودتر از کار بیفته.
+    $ready = false;
+    $waited = 0.0;
+    while ($waited < 5.0) {
+        $status = proc_get_status($proc);
+        if (!$status['running']) break;
+        $probe = @fsockopen('127.0.0.1', $localPort, $errno, $errstr, 0.2);
+        if ($probe) { fclose($probe); $ready = true; break; }
+        usleep(200000);
+        $waited += 0.2;
+    }
+
+    $status = proc_get_status($proc);
+    $err = null;
+    if (!$ready || !$status['running']) {
+        $err = trim((string)@file_get_contents($stderrFile)) ?: 'خطای نامشخص';
+    }
+
+    return ['ready' => $ready && $status['running'], 'error' => $err, 'proc' => $proc, 'pipes' => $pipes, 'configFile' => $configFile, 'stderrFile' => $stderrFile, 'localPort' => $localPort];
+}
+
+// پاک‌سازی تضمینی یه اجرای xray: پروسه (با تشدید تا SIGKILL) + فایل کانفیگ موقت.
+function cleanupXrayInstance(?array $attempt): void {
+    if (!$attempt) return;
+    $proc = $attempt['proc'] ?? null;
+    if (is_resource($proc)) {
+        foreach (($attempt['pipes'] ?? []) as $p) { if (is_resource($p)) @fclose($p); }
+        // اول SIGTERM؛ اگه چند لحظه بعدش هنوز زنده بود (مثلاً وسط بستن اتصالات
+        // SOCKS/VLESS گیر کرده)، SIGKILL بزن تا proc_close برای همیشه بلاک
+        // نشه و پورت/فایل کانفیگ رو معطل نگه نداره.
+        @proc_terminate($proc);
+        $killWaited = 0.0;
+        while ($killWaited < 2.0) {
+            $st = @proc_get_status($proc);
+            if (!$st || !$st['running']) break;
+            usleep(200000);
+            $killWaited += 0.2;
+        }
+        $st = @proc_get_status($proc);
+        if ($st && $st['running']) @proc_terminate($proc, 9);
+        @proc_close($proc);
+    }
+    if (!empty($attempt['configFile'])) @unlink($attempt['configFile']);
+    if (!empty($attempt['stderrFile'])) @unlink($attempt['stderrFile']);
+}
+
+// دیتاسنتر/ISP واقعیِ سروری که کانفیگ روش هست، از روی IP (نه یه حدس)، از
+// طریق ip-api.com (رایگان، بدون کلید). اگه هاست دامنه باشه، اول resolve می‌شه.
+function lookupIpDatacenterInfo(string $host): array {
+    $ip = filter_var($host, FILTER_VALIDATE_IP) ? $host : gethostbyname($host);
+    if (!filter_var($ip, FILTER_VALIDATE_IP)) return ['ok' => false];
+
+    $ch = curl_init("http://ip-api.com/json/{$ip}?fields=status,country,city,isp,org,as,query");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 8]);
+    $raw = curl_exec($ch);
+    curl_close($ch);
+    $data = json_decode((string)$raw, true);
+    if (!is_array($data) || ($data['status'] ?? '') !== 'success') return ['ok' => false, 'ip' => $ip];
+
+    return [
+        'ok'      => true,
+        'ip'      => $data['query'] ?? $ip,
+        'country' => $data['country'] ?? '',
+        'city'    => $data['city'] ?? '',
+        'isp'     => $data['isp'] ?? '',
+        'org'     => $data['org'] ?? '',
+        'as'      => $data['as'] ?? '',
+    ];
+}
+
 // آپدیت شده برای ارسال به گروه دوم (پشتیبان)
 function sendTopicReport($pdo, string $reportText, string $topicName, string $threadKey, ?string $filePath = null): void {
     $reportText = applyPremiumToText($reportText); 
@@ -3265,6 +3668,93 @@ try {
             exit;
         }
 
+        if (preg_match('/^speedtest_srv_(\d+)$/', $data, $tsm)) {
+            if (!$isAdmin) exit;
+            $idx = (int)$tsm[1];
+            $stmt = $pdo->prepare("SELECT data FROM user_states WHERE user_id = ? AND state = 'HAS_SUB_DATA'");
+            $stmt->execute([$chatId]);
+            $state = $stmt->fetch();
+            if (!$state) { answerCallback($callbackId, '❌ سشن منقضی شده، دوباره لینک ساب رو بفرست.', true); exit; }
+
+            $stateData = json_decode($state['data'], true);
+            if (time() - ($stateData['time'] ?? 0) > 300) {
+                answerCallback($callbackId, '❌ زمان ۵ دقیقه‌ای این پنل تمام شده است.', true);
+                exit;
+            }
+
+            $servers = $stateData['test_servers'] ?? [];
+            if (!isset($servers[$idx]) || ($servers[$idx]['protocol'] ?? '') !== 'vless' || empty($servers[$idx]['raw'])) {
+                answerCallback($callbackId, '❌ این سرور دیگه در دسترس نیست؛ لیست تست سرورها رو دوباره باز کن.', true);
+                exit;
+            }
+
+            $srv      = $servers[$idx];
+            $safeName = htmlspecialchars(mb_strimwidth((string)$srv['name'], 0, 60, '…'), ENT_QUOTES, 'UTF-8');
+            $safeHost = htmlspecialchars((string)$srv['host'], ENT_QUOTES, 'UTF-8');
+            $backKb   = ['inline_keyboard' => [[createBtn('🔙 بازگشت به لیست سرورها', 'test_servers_menu', 'danger', 'btn_back')]]];
+
+            answerCallback($callbackId, '', false);
+
+            if (!isXrayInstalled()) {
+                $installKb = ['inline_keyboard' => [
+                    [createBtn('📥 نصب xray', 'install_xray_binary', 'success', 'btn_install_xray')],
+                    [createBtn('🔙 بازگشت', 'test_servers_menu', 'danger', 'btn_back')],
+                ]];
+                editMessageText($chatId, $messageId, "⚠️ برای تست سرعت واقعی، ابتدا باید xray-core روی سرور نصب بشه (فقط یک‌بار لازمه).", $installKb);
+                exit;
+            }
+
+            $parsed = parseVlessUriForXray($srv['raw']);
+            if (!$parsed) {
+                editMessageText($chatId, $messageId, "❌ این کانفیگ VLESS از ترکیب تنظیماتی استفاده می‌کنه که فعلاً پشتیبانی نمی‌شه (فقط tcp/ws/grpc + none/tls/reality پشتیبانی می‌شه).", $backKb);
+                exit;
+            }
+
+            editMessageText($chatId, $messageId, "⏳ <b>در حال تست سرعت واقعی...</b>\n\n{$safeName}\n<code>{$safeHost}:{$srv['port']}</code>\n\nیک پروکسی واقعی از طریق همین کانفیگ بالا میاد و دانلود/آپلود واقعی اندازه‌گیری می‌شه؛ ممکنه ۱۰ تا ۲۰ ثانیه طول بکشه.");
+
+            $speed = runXraySpeedTest($parsed['outbound']);
+            $geo   = lookupIpDatacenterInfo($parsed['address']);
+
+            if (!$speed['ok']) {
+                editMessageText($chatId, $messageId, "❌ تست سرعت ناموفق بود:\n<code>" . htmlspecialchars((string)$speed['error'], ENT_QUOTES, 'UTF-8') . "</code>", $backKb);
+                exit;
+            }
+
+            $resultText  = "🚀 <b>نتیجه‌ی تست سرعت واقعی</b>\n<b>{$safeName}</b>\n<code>{$safeHost}:{$srv['port']}</code>\n\n";
+            $resultText .= "⬇️ دانلود: <b>" . ($speed['download_mbps'] !== null ? $speed['download_mbps'] . ' Mbps' : 'نامشخص') . "</b>\n";
+            $resultText .= "⬆️ آپلود: <b>" . ($speed['upload_mbps'] !== null ? $speed['upload_mbps'] . ' Mbps' : 'نامشخص') . "</b>\n\n";
+            if ($geo['ok']) {
+                $safeIsp     = htmlspecialchars((string)($geo['isp'] ?: $geo['org']), ENT_QUOTES, 'UTF-8');
+                $safeOrg     = htmlspecialchars((string)$geo['org'], ENT_QUOTES, 'UTF-8');
+                $safeAs      = htmlspecialchars((string)$geo['as'], ENT_QUOTES, 'UTF-8');
+                $safeCity    = htmlspecialchars((string)($geo['city'] ?? ''), ENT_QUOTES, 'UTF-8');
+                $safeCountry = htmlspecialchars((string)($geo['country'] ?? ''), ENT_QUOTES, 'UTF-8');
+                $resultText .= "🏢 دیتاسنتر/ISP: <b>{$safeIsp}</b>\n";
+                if (!empty($geo['org']) && $geo['org'] !== $geo['isp']) $resultText .= "🏷 سازمان: {$safeOrg}\n";
+                if (!empty($geo['as']))     $resultText .= "📡 {$safeAs}\n";
+                $resultText .= "🌍 موقعیت: " . trim($safeCity . ', ' . $safeCountry, ', ') . "\n\n";
+            }
+            $resultText .= "ℹ️ <i>این سرعت، سرعتِ مسیر «سرورِ خودِ ربات ↔ این کانفیگ»ه؛ لزوماً همون سرعتی نیست که یک کاربر داخل ایران تجربه می‌کنه.</i>";
+
+            editMessageText($chatId, $messageId, $resultText, $backKb);
+            exit;
+        }
+
+        if ($data === 'install_xray_binary') {
+            if (!$isAdmin) exit;
+            answerCallback($callbackId, '', false);
+            editMessageText($chatId, $messageId, "⏳ در حال دانلود و نصب xray-core از گیت‌هاب رسمی...\nممکنه چند ثانیه طول بکشه.");
+
+            $res = installXrayBinary();
+            $backKb = ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'test_servers_menu', 'danger', 'btn_back')]]];
+            if ($res['ok']) {
+                editMessageText($chatId, $messageId, "✅ xray با موفقیت نصب شد" . (!empty($res['version']) ? "\n<code>" . htmlspecialchars($res['version'], ENT_QUOTES, 'UTF-8') . "</code>" : '') . "\n\nحالا می‌تونی از دکمه‌ی «🚀 سرعت واقعی» روی هر سرور vless استفاده کنی.", $backKb);
+            } else {
+                editMessageText($chatId, $messageId, "❌ نصب xray ناموفق بود:\n" . htmlspecialchars((string)$res['error'], ENT_QUOTES, 'UTF-8'), $backKb);
+            }
+            exit;
+        }
+
         if (in_array($data, ['get_extracted_configs', 'get_extracted_ips', 'update_sub_data', 'get_qr_code', 'get_configs_qr', 'test_servers_menu'])) {
             $stmt = $pdo->prepare("SELECT data FROM user_states WHERE user_id = ? AND state = 'HAS_SUB_DATA'");
             $stmt->execute([$chatId]);
@@ -3349,7 +3839,16 @@ try {
                                 $key = $hp['host'] . ':' . $hp['port'];
                                 if (isset($seen[$key])) continue; // چند کانفیگ ممکنه روی یه سرور باشن، فقط یه بار نشونش بده
                                 $seen[$key] = true;
-                                $servers[] = ['name' => $c['name'], 'host' => $hp['host'], 'port' => $hp['port']];
+                                $protocol = strtolower($c['protocol'] ?? '');
+                                // raw فقط وقتی نگه داشته می‌شه که واقعاً یه vless:// قابل‌پارس‌شدنه
+                                // (نه placeholder ساختگی‌ای که هنگام پارس Clash-YAML/sing-box ساخته
+                                // می‌شه، مثل vless://base64(proto:server:port)#name که نه UUID داره نه
+                                // پارامترهای واقعی)؛ چون در اون حالت parseVlessUriForXray هیچ‌وقت موفق
+                                // نمی‌شه و دکمه‌ی «سرعت واقعی» همیشه با خطای گمراه‌کننده مواجه می‌شه.
+                                // هم این پیش‌بررسی، هم صرفه‌جویی در حجم user_states.data (ستون TEXT با
+                                // تا ۶۰ سرور) رو با هم حل می‌کنه.
+                                $rawForSpeedTest = ($protocol === 'vless' && parseVlessUriForXray($c['raw']) !== null) ? $c['raw'] : null;
+                                $servers[] = ['name' => $c['name'], 'host' => $hp['host'], 'port' => $hp['port'], 'protocol' => $protocol, 'raw' => $rawForSpeedTest];
                             }
 
                             if (empty($servers)) {
@@ -3366,6 +3865,19 @@ try {
                             $row = [];
                             foreach ($servers as $i => $s) {
                                 $label = mb_strimwidth($s['name'] . ' — ' . $s['host'], 0, 40, '…');
+                                // تست سرعت واقعی (Mbps از طریق xray) فقط وقتی نشون داده می‌شه که این
+                                // ورودی از قبل موفق pars شده (یعنی واقعاً یه vless:// قابل‌فهمه، نه
+                                // placeholderِ ساختگیِ Clash/sing-box) و فقط برای ادمین در دسترسه، چون
+                                // خودِ سرور ما مبدأ دانلود/آپلود واقعیه و نباید هر کاربری بتونه با ساب
+                                // دلخواه (host:port دلخواه) این عملیات نسبتاً سنگین رو صدا بزنه.
+                                if ($isAdmin && !empty($s['raw'])) {
+                                    if (!empty($row)) { $kb['inline_keyboard'][] = $row; $row = []; }
+                                    $kb['inline_keyboard'][] = [
+                                        createBtn($label, "test_srv_{$i}", 'primary', 'btn_test_server_item'),
+                                        createBtn('🚀 سرعت واقعی', "speedtest_srv_{$i}", 'success', 'btn_speed_test_item'),
+                                    ];
+                                    continue;
+                                }
                                 $row[] = createBtn($label, "test_srv_{$i}", 'primary', 'btn_test_server_item');
                                 if (count($row) == 2) { $kb['inline_keyboard'][] = $row; $row = []; }
                             }
