@@ -3,6 +3,9 @@
 // نسخه‌ی محکم‌شده: هر خروجی اضافه/خطای PHP رو می‌قاپه تا پاسخ همیشه JSON معتبر بمونه.
 declare(strict_types=1);
 date_default_timezone_set('Asia/Tehran'); // باید هم‌راستا با bot.php باشه
+// استخراج وایرگارد ممکنه چند batch درخواست موازی به ?host=N بزنه (mergeWireguardHostVariants)؛
+// بدون این، اگه پنل هدف کند باشه، PHP وسط کار با max_execution_time پیش‌فرض قطع می‌شه.
+set_time_limit(0);
 
 // هر چیزی که قبل از موقع (Warning/Notice/BOM و ...) چاپ بشه رو می‌گیریم تا JSON کثیف نشه
 ob_start();

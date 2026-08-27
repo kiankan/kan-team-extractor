@@ -73,35 +73,122 @@ class AdvancedSubExtractor {
     // پارامتر ?host=2, ?host=3, ... روی همون لینکِ ساب برای سوییچ بین سرورها استفاده
     // می‌کنن (لینک پایه بدون پارامتر معادل host=1 هست). این متد وقتی پاسخِ پایه
     // وایرگارده، همین پارامتر رو با شماره‌های بعدی امتحان می‌کنه و هر سرور جدیدی که
-    // پیدا کنه رو اضافه می‌کنه؛ وقتی پاسخ تکراری بشه (یعنی سرورها تموم شدن و برگشته
-    // به همون اولی) یا دیگه وایرگارد نباشه، متوقف می‌شه — نه بی‌نهایت زنجیر می‌شه، نه
-    // برای ساب‌های غیروایرگارد حتی یه درخواست اضافه می‌زنه.
+    // پیدا کنه رو اضافه می‌کنه.
+    //
+    // نکته‌ی مهم (پیدا شده با تست واقعی روی asan-ps): ?host=N همیشه خطی/ترتیبی به
+    // سرورها نگاشت نمی‌شه؛ بعضی پنل‌ها انتخاب شبه‌تصادفی/وزن‌دار دارن — یعنی یه
+    // سرورِ «پیش‌فرض» ممکنه توی چند host پشت‌سرهم تکرار بشه و بعد یه سرورِ کاملاً
+    // جدید ظاهر بشه. قبلاً با اولین پاسخِ تکراری کل حلقه متوقف می‌شد که باعث می‌شد
+    // خیلی از سرورهای واقعی اصلاً کشف نشن.
+    //
+    // الان به‌جای اون، در batchهای ۸تایی موازی (curl_multi) پیش می‌ریم؛ فقط وقتی
+    // یک batch کامل هیچ سرور/پاسخ تازه‌ای نده متوقف می‌شیم (نه با اولین تکرار) —
+    // این هم صبرِ کافی برای پنل‌های شبه‌تصادفی می‌ده (بیشترین رشته‌ی تکرارِ
+    // پشت‌سرهمی که تو تست واقعی دیدیم ۲ تا بود، خیلی کمتر از یک batch کامل)، هم
+    // برای ساب‌های ساده/تک‌سروره فقط یک batch اضافه هزینه داره، و هم اگه پنل شروع
+    // به خطا/rate-limit کنه (که همون batch رو بی‌نتیجه می‌کنه) زودتر متوقف می‌شیم
+    // به‌جای اینکه بی‌فایده کل بازه رو بمباران کنیم.
     public function mergeWireguardHostVariants(string $url, string $baseResponse, array $configs, bool $useBrowserUA = false): array {
         if (!$this->isWireguardConf($baseResponse)) return $configs;
 
+        $maxHost   = 30;
+        $batchSize = 8;
         $seenResponses = [$baseResponse];
         $existingRaw   = array_column($configs, 'raw');
 
-        for ($hostIdx = 2; $hostIdx <= 12; $hostIdx++) {
-            $sep        = (strpos($url, '?') === false) ? '?' : '&';
-            $variantUrl = $url . $sep . 'host=' . $hostIdx;
-            $resp       = $this->fetchUrl($variantUrl, $useBrowserUA);
+        for ($batchStart = 2; $batchStart <= $maxHost; $batchStart += $batchSize) {
+            $batchEnd = min($batchStart + $batchSize - 1, $maxHost);
+            $urls = [];
+            for ($hostIdx = $batchStart; $hostIdx <= $batchEnd; $hostIdx++) {
+                $sep    = (strpos($url, '?') === false) ? '?' : '&';
+                $urls[] = $url . $sep . 'host=' . $hostIdx;
+            }
 
-            if ($resp === null || $resp === '') break;
-            if (in_array($resp, $seenResponses, true)) break; // تکرار شد یعنی سرورها تموم شدن
-            $seenResponses[] = $resp;
+            $foundNewInBatch = false;
+            foreach ($this->fetchUrlBatchParallel($urls, $useBrowserUA) as $resp) {
+                if ($resp === null || $resp === '') continue;
+                if (!$this->isWireguardConf($resp)) continue;
+                if (in_array($resp, $seenResponses, true)) continue; // این پاسخِ خاص رو قبلاً دیدیم
+                $seenResponses[]  = $resp;
+                $foundNewInBatch  = true;
 
-            if (!$this->isWireguardConf($resp)) break;
-
-            foreach ($this->parseWireguardConf($resp) as $c) {
-                if (!in_array($c['raw'], $existingRaw, true)) {
-                    $configs[]      = $c;
-                    $existingRaw[]  = $c['raw'];
+                foreach ($this->parseWireguardConf($resp) as $c) {
+                    if (!in_array($c['raw'], $existingRaw, true)) {
+                        $configs[]      = $c;
+                        $existingRaw[]  = $c['raw'];
+                    }
                 }
             }
+
+            if (!$foundNewInBatch) break;
         }
 
         return $configs;
+    }
+
+    // آپشن‌های curl مشترک بین fetchUrl (تکی) و fetchUrlBatchParallel (موازی)، تا
+    // تغییرات آینده (UA، تایم‌اوت، هدرها) فقط یک‌جا لازم باشه، نه در چند نسخه‌ی جدا.
+    private function baseCurlOptions(bool $useBrowserUA): array {
+        return [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_USERAGENT      => $useBrowserUA
+                ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                : 'v2rayNG/1.8.18',
+            CURLOPT_ENCODING       => "",
+            CURLOPT_HTTPHEADER     => [
+                'Accept: application/json, text/plain, */*',
+                'Accept-Encoding: gzip, deflate',
+                'Connection: keep-alive',
+            ],
+        ];
+    }
+
+    // یک batch از URLها رو موازی (با curl_multi) می‌گیره — نه بازه‌ی کامل، فقط
+    // همون batchی که بهش داده شده (بازه‌بندی/توقف زودهنگام کارِ فراخوان‌ست، مثل
+    // mergeWireguardHostVariants بالا). خروجی دقیقاً هم‌ترتیب با $urls برمی‌گرده؛
+    // هر موردی که خطا داد، null.
+    private function fetchUrlBatchParallel(array $urls, bool $useBrowserUA): array {
+        $mh      = curl_multi_init();
+        $handles = [];
+
+        foreach ($urls as $u) {
+            $ch = curl_init($u);
+            curl_setopt_array($ch, $this->baseCurlOptions($useBrowserUA));
+            curl_multi_add_handle($mh, $ch);
+            $handles[] = $ch;
+        }
+
+        $running = null;
+        do {
+            $status = curl_multi_exec($mh, $running);
+            if ($running) curl_multi_select($mh, 1.0);
+        } while ($running && $status === CURLM_OK);
+
+        $results = [];
+        foreach ($handles as $ch) {
+            $resp     = curl_multi_getcontent($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+
+            if ($resp === false || $resp === '' || (int)$httpCode === 0) {
+                $results[] = null;
+                continue;
+            }
+            if (function_exists('gzdecode') && substr($resp, 0, 2) === "\x1f\x8b") {
+                $resp = gzdecode($resp) ?: $resp;
+            }
+            $results[] = $resp;
+        }
+
+        curl_multi_close($mh);
+        return $results;
     }
 
     private function parseAny(string $response): array {
