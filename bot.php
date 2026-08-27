@@ -1876,6 +1876,33 @@ function saveExtraction($pdo, string $token, $userId, string $subUrl, array $sub
     $stmt->execute([$token, $userId, $subUrl, $subData['total_configs'] ?? 0, $totalBytes, $usedBytes, $expireTs, $configsJson]);
 }
 
+// آمار روزانه‌ی ناشناس برای نمودارهای داشبورد پنل وب (فقط عدد؛ نه لینک ساب، نه
+// user_id، نه محتوای کانفیگ). عمداً از خودِ saveExtraction() صدا زده نمی‌شه و
+// فقط سرِ استخراج تازه (نه هر بار «بروزرسانی» همون توکن) فراخوانی می‌شه، وگرنه
+// کلیک‌های مکرر روی بروزرسانی، نمودار «چند استخراج امروز» رو مصنوعی باد می‌کرد.
+function recordDailyStats($pdo, array $subData): void {
+    // این آمار صرفاً برای نمودار داشبوردِ پنل وبه، نه بخشی از مسیر اصلی پاسخ به
+    // کاربر؛ اگه نصب قدیمی هنوز از table.php برای ساخت این دو جدول جدید عبور
+    // نکرده باشه (یا هر خطای گذرای دیتابیس دیگه‌ای پیش بیاد)، نباید کل پاسخِ
+    // استخراج (که قبلاً با موفقیت انجام و ذخیره شده) رو به‌خاطرش از دست بدیم.
+    try {
+        $totalConfigs = (int)($subData['total_configs'] ?? 0);
+        $pdo->prepare("INSERT INTO stats_daily (stat_date, extractions_count, total_configs_sum) VALUES (CURDATE(), 1, ?)
+            ON DUPLICATE KEY UPDATE extractions_count = extractions_count + 1, total_configs_sum = total_configs_sum + VALUES(total_configs_sum)")
+            ->execute([$totalConfigs]);
+
+        foreach (($subData['protocols'] ?? []) as $protocol => $count) {
+            $count = (int)$count;
+            if ($count <= 0) continue;
+            $pdo->prepare("INSERT INTO stats_daily_protocols (stat_date, protocol, configs_count) VALUES (CURDATE(), ?, ?)
+                ON DUPLICATE KEY UPDATE configs_count = configs_count + VALUES(configs_count)")
+                ->execute([$protocol, $count]);
+        }
+    } catch (\Throwable $e) {
+        // ساکت رد می‌شیم؛ آمار داشبورد نباید مسیر اصلی استخراج/پاسخ به کاربر رو بشکنه.
+    }
+}
+
 // لیست کانفیگ‌های ذخیره‌شده (که هنگام استخراج/بروزرسانی اخیر در جدول extractions
 // ذخیره شده) رو برمی‌گردونه، یا null اگه چیزی پیدا نشد.
 function getCachedConfigsList($pdo, string $viewToken): ?array {
@@ -2562,6 +2589,7 @@ try {
                     try {
                         $viewToken = generateExtractionToken();
                         saveExtraction($pdo, $viewToken, $chatId, $text, $subData, $headerInfo);
+                        recordDailyStats($pdo, $subData);
                         $viewUrl = getWebRootUrl() . "/sub_view.php?id=" . $viewToken;
 
                         $kb = buildMenuKeyboard($pdo, 'sub_menu', false, false, $viewUrl);
