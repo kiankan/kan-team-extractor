@@ -100,11 +100,15 @@ MSG_FA=(
     [prompt_token_retry]="توکن نمی‌تونه خالی باشه. دوباره وارد کن: "
     [prompt_admin]="آیدی عددی مدیر اصلی (از @userinfobot): "
     [prompt_admin_retry]="فقط باید عدد باشه. دوباره وارد کن: "
+    [prompt_port]="پورتی که Nginx روش گوش بده [پیش‌فرض 80، برای پیش‌فرض Enter بزن]: "
+    [prompt_port_retry]="پورت باید یک عدد بین 1 تا 65535 باشه. دوباره وارد کن: "
     [prompt_ssl_email]="ایمیلت برای گواهی SSL (Let's Encrypt) [اختیاری، برای رد شدن Enter بزن]: "
     [prompt_restore_db]="مسیر یک بکاپ دیتابیس قبلی (.sql) برای بازیابی [اختیاری، برای رد شدن Enter بزن]: "
     [prompt_restore_source]="مسیر یک بکاپ سورس قبلی (.zip) برای بازیابی [اختیاری، برای رد شدن Enter بزن]: "
     [summary_title]="خلاصه:"
     [lbl_domain]="دامنه:"
+    [lbl_port]="پورت:"
+    [lbl_alt_panel_url]="آدرس جایگزین (پورت انتخابی):"
     [lbl_webroot]="مسیر فایل‌ها:"
     [lbl_dbname]="نام دیتابیس:"
     [lbl_dbuser]="یوزر دیتابیس:"
@@ -116,7 +120,8 @@ MSG_FA=(
     [unknown_flag_ignored]="گزینه‌ی ناشناخته نادیده گرفته شد: %s"
     [missing_required_flags]="گزینه‌های اجباری وارد نشدن: %s"
     [admin_must_be_number]="--admin فقط باید عدد باشه."
-    [installing_with]="در حال نصب با: دامنه=%s ادمین=%s ایمیل=%s"
+    [port_must_be_number]="--port فقط باید یک عدد بین 1 تا 65535 باشه."
+    [installing_with]="در حال نصب با: دامنه=%s پورت=%s ادمین=%s ایمیل=%s"
     [none_placeholder]="<هیچ‌کدام>"
     [will_restore_db]="بکاپ دیتابیس بازیابی می‌شه: %s"
     [will_restore_source]="بکاپ سورس بازیابی می‌شه: %s"
@@ -158,6 +163,8 @@ MSG_FA=(
     [ssl_fail1]="دریافت SSL شکست خورد (جزئیات: /tmp/teamkan_certbot.log). فعلاً روی HTTP ادامه می‌دیم؛"
     [ssl_fail2]="بعد از اینکه DNS دامنه درست تنظیم شد، 'kanbot' رو اجرا کن و گزینه‌ی تمدید SSL رو بزن، یا 'sudo kanbot menu'."
     [ssl_fail3]="توجه: تلگرام فقط HTTPS رو برای وب‌هوک قبول می‌کنه، پس بات در دسترس نخواهد بود تا وقتی SSL درست بشه."
+    [custom_port_ssl_ok]="گواهی SSL روی پورت %s هم فعال شد؛ بات از هر دو پورت (443 و همین پورت) با HTTPS در دسترسه."
+    [custom_port_ssl_fail]="فعال‌سازی SSL روی پورت انتخابی شکست خورد (جزئیات: /tmp/teamkan_nginx.log). سایت همچنان روی 443 با HTTPS و روی پورت انتخابی با HTTP در دسترسه."
 
     [webhook_title]="در حال تنظیم وب‌هوک تلگرام"
     [webhook_ok]="وب‌هوک با موفقیت روی %s ست شد"
@@ -272,6 +279,8 @@ MSG_EN=(
     [collect_title]="Collecting install info"
     [prompt_domain]="Domain that already points to this server (e.g. bot.example.com): "
     [prompt_domain_retry]="Domain can't be empty. Enter it again: "
+    [prompt_port]="Port Nginx should listen on [default 80, press Enter for default]: "
+    [prompt_port_retry]="Port must be a number between 1 and 65535. Enter it again: "
     [prompt_token]="Bot token (from @BotFather): "
     [prompt_token_retry]="Token can't be empty. Enter it again: "
     [prompt_admin]="Main admin's numeric ID (from @userinfobot): "
@@ -281,6 +290,8 @@ MSG_EN=(
     [prompt_restore_source]="Path to a previous source backup (.zip) to restore [optional, press Enter to skip]: "
     [summary_title]="Summary:"
     [lbl_domain]="Domain:"
+    [lbl_port]="Port:"
+    [lbl_alt_panel_url]="Alternate URL (chosen port):"
     [lbl_webroot]="File path:"
     [lbl_dbname]="Database name:"
     [lbl_dbuser]="Database user:"
@@ -292,7 +303,8 @@ MSG_EN=(
     [unknown_flag_ignored]="Unknown option ignored: %s"
     [missing_required_flags]="Missing required options: %s"
     [admin_must_be_number]="--admin must be a number."
-    [installing_with]="Installing with: domain=%s admin=%s email=%s"
+    [port_must_be_number]="--port must be a number between 1 and 65535."
+    [installing_with]="Installing with: domain=%s port=%s admin=%s email=%s"
     [none_placeholder]="<none>"
     [will_restore_db]="Database backup will be restored: %s"
     [will_restore_source]="Source backup will be restored: %s"
@@ -334,6 +346,8 @@ MSG_EN=(
     [ssl_fail1]="Obtaining SSL failed (details: /tmp/teamkan_certbot.log). Continuing on HTTP for now;"
     [ssl_fail2]="once the domain's DNS is set up correctly, run 'kanbot' and pick the SSL renew option, or use 'sudo kanbot menu'."
     [ssl_fail3]="Note: Telegram only accepts HTTPS for webhooks, so the bot won't be reachable until SSL is fixed."
+    [custom_port_ssl_ok]="SSL also enabled on port %s; the bot is reachable over HTTPS on both 443 and this port."
+    [custom_port_ssl_fail]="Enabling SSL on the chosen port failed (details: /tmp/teamkan_nginx.log). The site is still reachable over HTTPS on 443 and over HTTP on the chosen port."
 
     [webhook_title]="Setting up the Telegram webhook"
     [webhook_ok]="Webhook set successfully at %s"
@@ -534,7 +548,7 @@ usage() {
         cat <<USAGE
 Usage:
   sudo bash install.sh install                          Interactive install (asks questions)
-  sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--email=E]
+  sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--port=P] [--email=E]
                                 [--restore-db=/path/db_backup.sql] [--restore-source=/path/source_backup.zip]
                                                           Silent/unattended install (no questions)
   sudo bash install.sh update
@@ -563,6 +577,13 @@ Restoring a previous backup during install:
   without the "restore-" prefix (--db=, --source=) also work on the standalone
   'restore' command, to restore a backup onto an existing install.
 
+Port (--port=P, default 80): the port Nginx serves the panel/bot on. Port 80
+stays open regardless, because Let's Encrypt (HTTP-01) always validates the
+domain over port 80 — so SSL is still obtained automatically either way. If
+you pick a different port, that port is opened too and, once the certificate
+is issued, gets HTTPS on it as well, so the bot ends up reachable both at
+https://DOMAIN (443) and https://DOMAIN:PORT.
+
 Remote one-liner (no local file needed) — interactive, asks questions one by
 one exactly like running it locally:
   curl -sL $INSTALL_SCRIPT_URL | sudo bash -s -- install
@@ -582,7 +603,7 @@ USAGE
         cat <<USAGE
 راهنما:
   sudo bash install.sh install                          نصب تعاملی (سوال می‌پرسه)
-  sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--email=E]
+  sudo bash install.sh install [--domain=D] [--token=T] [--admin=A] [--port=P] [--email=E]
                                 [--restore-db=/path/db_backup.sql] [--restore-source=/path/source_backup.zip]
                                                           نصب بی‌صدا/خودکار (بدون هیچ سوالی)
   sudo bash install.sh update
@@ -610,6 +631,13 @@ USAGE
   هر دو اختیاری هستن و می‌تونن با هم یا جدا استفاده بشن. همین فلگ‌ها بدون پیشوند
   "restore-" (--db=، --source=) روی دستور مستقل 'restore' هم کار می‌کنن، برای
   بازیابی بکاپ روی یه نصب موجود.
+
+پورت (--port=P، پیش‌فرض 80): پورتی که Nginx پنل/بات رو روش سرو می‌کنه. پورت 80
+در هر حالت باز می‌مونه، چون Let's Encrypt (روش HTTP-01) همیشه دامنه رو از طریق
+پورت 80 تایید می‌کنه — پس SSL همچنان به‌طور خودکار گرفته می‌شه. اگه پورت دیگه‌ای
+انتخاب کنی، اون پورت هم باز می‌شه و بعد از گرفتن گواهی، HTTPS روش هم فعال
+می‌شه؛ یعنی بات هم از https://دامنه (۴۴۳) هم از https://دامنه:پورت در دسترس
+می‌مونه.
 
 یک‌خطی از راه دور (بدون نیاز به فایل محلی) — تعاملی، سوال‌ها رو یکی‌یکی
 دقیقاً مثل اجرای محلی می‌پرسه:
@@ -677,6 +705,13 @@ validate_restore_file() {
     return 0
 }
 
+# پورت وارد‌شده رو اعتبارسنجی می‌کنه: باید یک عدد صحیح بین 1 تا 65535 باشه.
+is_valid_port() {
+    local p="$1"
+    [[ "$p" =~ ^[0-9]+$ ]] || return 1
+    (( p >= 1 && p <= 65535 ))
+}
+
 collect_inputs() {
     title "$(t collect_title)"
     tty_read "$(t prompt_domain)" DOMAIN
@@ -687,6 +722,10 @@ collect_inputs() {
 
     tty_read "$(t prompt_admin)" ADMIN_ID
     while ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; do tty_read "$(t prompt_admin_retry)" ADMIN_ID; done
+
+    tty_read "$(t prompt_port)" PORT
+    while [[ -n "$PORT" ]] && ! is_valid_port "$PORT"; do tty_read "$(t prompt_port_retry)" PORT; done
+    [[ -z "$PORT" ]] && PORT="80"
 
     tty_read "$(t prompt_ssl_email)" SSL_EMAIL
 
@@ -704,6 +743,7 @@ collect_inputs() {
     echo
     info "$(t summary_title)"
     echo "  $(t lbl_domain)            $DOMAIN"
+    echo "  $(t lbl_port)              $PORT"
     echo "  $(t lbl_webroot)      $WEBROOT"
     echo "  $(t lbl_dbname)       $DB_NAME"
     [[ -n "$RESTORE_DB_FILE" ]]     && echo "  $(t lbl_restore_db)   $RESTORE_DB_FILE"
@@ -718,12 +758,13 @@ collect_inputs() {
 # مسیر ورودی غیرتعاملی: --domain= --token= --admin= --email=
 # --restore-db= --restore-source= رو پارس می‌کنه
 parse_install_args() {
-    DOMAIN=""; BOT_TOKEN=""; ADMIN_ID=""; SSL_EMAIL=""; RESTORE_DB_FILE=""; RESTORE_SOURCE_FILE=""
+    DOMAIN=""; BOT_TOKEN=""; ADMIN_ID=""; PORT=""; SSL_EMAIL=""; RESTORE_DB_FILE=""; RESTORE_SOURCE_FILE=""
     for arg in "$@"; do
         case "$arg" in
             --domain=*)         DOMAIN="${arg#*=}" ;;
             --token=*)          BOT_TOKEN="${arg#*=}" ;;
             --admin=*)          ADMIN_ID="${arg#*=}" ;;
+            --port=*)           PORT="${arg#*=}" ;;
             --email=*)          SSL_EMAIL="${arg#*=}" ;;
             --restore-db=*)     RESTORE_DB_FILE="${arg#*=}" ;;
             --restore-source=*) RESTORE_SOURCE_FILE="${arg#*=}" ;;
@@ -744,11 +785,16 @@ parse_install_args() {
         err "$(t admin_must_be_number)"
         exit 1
     fi
+    if [[ -n "$PORT" ]] && ! is_valid_port "$PORT"; then
+        err "$(t port_must_be_number)"
+        exit 1
+    fi
+    [[ -z "$PORT" ]] && PORT="80"
     validate_restore_file "$RESTORE_DB_FILE" "$(t label_db_backup)" || exit 1
     validate_restore_file "$RESTORE_SOURCE_FILE" "$(t label_source_backup)" || exit 1
 
     finalize_install_vars
-    info "$(t installing_with "$DOMAIN" "$ADMIN_ID" "${SSL_EMAIL:-$(t none_placeholder)}")"
+    info "$(t installing_with "$DOMAIN" "$PORT" "$ADMIN_ID" "${SSL_EMAIL:-$(t none_placeholder)}")"
     [[ -n "$RESTORE_DB_FILE" ]]     && info "$(t will_restore_db "$RESTORE_DB_FILE")"
     [[ -n "$RESTORE_SOURCE_FILE" ]] && info "$(t will_restore_source "$RESTORE_SOURCE_FILE")"
 }
@@ -758,6 +804,7 @@ finalize_install_vars() {
     DB_USER="teamkanbot"
     DB_PASS="$(rand_pass)"
     WEBROOT="/var/www/$DOMAIN"
+    PORT="${PORT:-80}"
 }
 
 install_packages() {
@@ -900,9 +947,16 @@ setup_nginx() {
     title "$(t nginx_title)"
     detect_php_fpm
 
+    # پورت 80 همیشه باز می‌مونه چون Let's Encrypt (HTTP-01) گواهی رو فقط از
+    # همون پورت تایید می‌کنه؛ اگه کاربر پورت دیگه‌ای هم انتخاب کرده باشه، به
+    # همین بلاک server اضافه می‌شه تا سایت از هر دو پورت در دسترس باشه.
+    local extra_listen=""
+    [[ "$PORT" != "80" ]] && extra_listen="    listen $PORT;"
+
     cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX
 server {
     listen 80;
+$extra_listen
     server_name $DOMAIN;
     root $WEBROOT;
     index webpanel.php;
@@ -929,6 +983,37 @@ NGINX
     ok "$(t nginx_ok)"
 }
 
+# بعد از اینکه setup_ssl گواهی رو گرفت، اگه کاربر یه پورت غیر از 80 هم انتخاب
+# کرده باشه، همون گواهی letsencrypt (از مسیر live/ که با هر تمدید خودکار
+# آپدیت می‌مونه) رو روی اون پورت هم فعال می‌کنیم؛ یعنی هم https://دامنه (۴۴۳
+# استاندارد، که Certbot خودش مدیریتش می‌کنه) هم https://دامنه:پورت کار می‌کنن.
+# بعد از اینکه setup_ssl گواهی رو گرفت، اگه کاربر یه پورت غیر از 80 هم انتخاب
+# کرده باشه، همون گواهی letsencrypt (از مسیر live/ که با هر تمدید خودکار
+# آپدیت می‌مونه) رو روی اون پورت هم فعال می‌کنیم؛ یعنی هم https://دامنه (۴۴۳
+# استاندارد، که Certbot خودش مدیریتش می‌کنه) هم https://دامنه:پورت کار می‌کنن.
+# توجه: به‌جای اضافه‌کردن یه server{} جدا برای همون پورت (که باعث دو تا
+# `listen $PORT` با تنظیمات ssl متفاوت و خطای nginx می‌شه)، فقط همون خط
+# `listen $PORT;` که خودِ setup_nginx نوشته رو داخل همون بلاک اصلی به
+# ssl ارتقا می‌دیم — یه بلاک، یه اعلان listen برای این پورت.
+setup_custom_port_ssl() {
+    [[ "$PORT" == "80" || "$PORT" == "443" ]] && return 0
+    local conf_file="/etc/nginx/sites-available/$DOMAIN"
+    local cert_dir="/etc/letsencrypt/live/$DOMAIN"
+    if [[ ! -f "$cert_dir/fullchain.pem" || ! -f "$cert_dir/privkey.pem" ]]; then
+        return 0
+    fi
+    if ! grep -qF "listen $PORT;" "$conf_file"; then
+        return 0
+    fi
+    sed -i "s|^    listen $PORT;\$|    listen $PORT ssl;\n    ssl_certificate     $cert_dir/fullchain.pem;\n    ssl_certificate_key $cert_dir/privkey.pem;|" "$conf_file"
+    if nginx -t >/tmp/teamkan_nginx.log 2>&1; then
+        systemctl reload nginx
+        ok "$(t custom_port_ssl_ok "$PORT")"
+    else
+        warn "$(t custom_port_ssl_fail)"
+    fi
+}
+
 setup_ssl() {
     title "$(t ssl_title)"
     warn "$(t ssl_domain_warn "$DOMAIN")"
@@ -938,6 +1023,7 @@ setup_ssl() {
     if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos "${email_arg[@]}" >/tmp/teamkan_certbot.log 2>&1; then
         ok "$(t ssl_ok)"
         SITE_URL="https://$DOMAIN"
+        setup_custom_port_ssl
     else
         warn "$(t ssl_fail1)"
         warn "$(t ssl_fail2)"
@@ -987,6 +1073,7 @@ save_conf() {
     mkdir -p "$CONF_DIR"
     cat > "$CONF_FILE" <<CONF
 DOMAIN="$DOMAIN"
+PORT="$PORT"
 WEBROOT="$WEBROOT"
 DB_NAME="$DB_NAME"
 DB_USER="$DB_USER"
@@ -1015,6 +1102,18 @@ install_management_symlink() {
     ok "$(t symlink_ok)"
 }
 
+# اگه کاربر پورتی غیر از 80/443 انتخاب کرده باشه، آدرس جایگزینِ همون پورت رو
+# برمی‌گردونه (https اگه گواهی روش فعال شده باشه، وگرنه http)؛ در غیر این
+# صورت رشته‌ی خالی برمی‌گردونه (یعنی آدرس جداگانه‌ای برای نمایش لازم نیست).
+alt_port_url() {
+    [[ "$PORT" == "80" || "$PORT" == "443" ]] && return 0
+    if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+        echo "https://$DOMAIN:$PORT"
+    else
+        echo "http://$DOMAIN:$PORT"
+    fi
+}
+
 do_install_steps() {
     install_packages
     setup_database
@@ -1033,6 +1132,8 @@ do_install_steps() {
 
     title "$(t install_done_title)"
     echo -e "${C_GREEN}$(t lbl_panel_url)${C_RESET} ${SITE_URL}/webpanel.php"
+    local alt_url; alt_url="$(alt_port_url)"
+    [[ -n "$alt_url" ]] && echo -e "${C_GREEN}$(t lbl_alt_panel_url)${C_RESET} ${alt_url}/webpanel.php"
     echo -e "${C_GREEN}$(t lbl_default_pass)${C_RESET} admin  ${C_YELLOW}$(t default_pass_warn)${C_RESET}"
     echo -e "${C_GREEN}$(t lbl_manage_next)${C_RESET} $(t manage_next_text "${C_BOLD}sudo kanbot${C_RESET}")"
     echo -e "            $(t manage_next_text2 "${C_BOLD}sudo kanbot update|info|status|restart|uninstall${C_RESET}")"
@@ -1070,6 +1171,9 @@ load_conf() {
     # اگه کاربر همین اجرا --lang داده باشه، به جای زبانِ ذخیره‌شده توی کانفیگ
     # همونو نگه می‌داریم (override موقت فقط برای همین دستور).
     [[ -n "$explicit" ]] && APP_LANG="$override"
+    # نصب‌های قدیمی‌تر (قبل از اضافه‌شدن پورت قابل‌انتخاب) توی $CONF_FILE مقدار
+    # PORT رو ندارن؛ 80 همون رفتار قبلی و پیش‌فرض nginx-e، پس عقب‌گرد امنیه.
+    PORT="${PORT:-80}"
 }
 
 find_phpfpm_service() {
@@ -1103,7 +1207,10 @@ mgmt_restart_all() {
 mgmt_info() {
     title "$(t info_title)"
     echo "$(t lbl_domain)              $DOMAIN"
+    echo "$(t lbl_port)                ${PORT:-80}"
     echo "$(t lbl_panel_url)           ${SITE_URL}/webpanel.php"
+    local alt_url; alt_url="$(alt_port_url)"
+    [[ -n "$alt_url" ]] && echo "$(t lbl_alt_panel_url)   ${alt_url}/webpanel.php"
     echo "$(t lbl_webroot)        $WEBROOT"
     echo "$(t lbl_dbname)         $DB_NAME"
     echo "$(t lbl_dbuser)        $DB_USER"
@@ -1178,9 +1285,12 @@ mgmt_reset_panel_password() {
 
 mgmt_ssl_renew() {
     title "$(t ssl_renew_title)"
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email \
-        && ok "$(t ssl_renew_ok)" \
-        || err "$(t ssl_renew_fail)"
+    if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email; then
+        ok "$(t ssl_renew_ok)"
+        setup_custom_port_ssl
+    else
+        err "$(t ssl_renew_fail)"
+    fi
 }
 
 # کاملاً خودکار: آخرین کد رو مستقیم از گیت‌هاب می‌کشه و دوباره دیپلوی می‌کنه.
