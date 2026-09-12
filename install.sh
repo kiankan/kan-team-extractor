@@ -108,7 +108,6 @@ MSG_FA=(
     [summary_title]="خلاصه:"
     [lbl_domain]="دامنه:"
     [lbl_port]="پورت:"
-    [lbl_alt_panel_url]="آدرس جایگزین (پورت انتخابی):"
     [lbl_webroot]="مسیر فایل‌ها:"
     [lbl_dbname]="نام دیتابیس:"
     [lbl_dbuser]="یوزر دیتابیس:"
@@ -121,6 +120,8 @@ MSG_FA=(
     [missing_required_flags]="گزینه‌های اجباری وارد نشدن: %s"
     [admin_must_be_number]="--admin فقط باید عدد باشه."
     [port_must_be_number]="--port فقط باید یک عدد بین 1 تا 65535 باشه."
+    [port_in_use]="پورت %s از قبل توسط یه سرویس دیگه (نه nginx) استفاده می‌شه:\n%s"
+    [port_conflict_abort]="نصب متوقف شد تا چیزی رو خراب نکنیم. یا اون سرویس رو آزاد کن، یا با --port پورت دیگه‌ای انتخاب کن (برای HTTPS اختصاصی، مثلاً وقتی 443 دست Xray/x-ui-ه)."
     [installing_with]="در حال نصب با: دامنه=%s پورت=%s ادمین=%s ایمیل=%s"
     [none_placeholder]="<هیچ‌کدام>"
     [will_restore_db]="بکاپ دیتابیس بازیابی می‌شه: %s"
@@ -163,8 +164,8 @@ MSG_FA=(
     [ssl_fail1]="دریافت SSL شکست خورد (جزئیات: /tmp/teamkan_certbot.log). فعلاً روی HTTP ادامه می‌دیم؛"
     [ssl_fail2]="بعد از اینکه DNS دامنه درست تنظیم شد، 'kanbot' رو اجرا کن و گزینه‌ی تمدید SSL رو بزن، یا 'sudo kanbot menu'."
     [ssl_fail3]="توجه: تلگرام فقط HTTPS رو برای وب‌هوک قبول می‌کنه، پس بات در دسترس نخواهد بود تا وقتی SSL درست بشه."
-    [custom_port_ssl_ok]="گواهی SSL روی پورت %s هم فعال شد؛ بات از هر دو پورت (443 و همین پورت) با HTTPS در دسترسه."
-    [custom_port_ssl_fail]="فعال‌سازی SSL روی پورت انتخابی شکست خورد (جزئیات: /tmp/teamkan_nginx.log). سایت همچنان روی 443 با HTTPS و روی پورت انتخابی با HTTP در دسترسه."
+    [custom_port_ssl_ok]="گواهی SSL روی پورت %s فعال شد؛ بات از https://دامنه:پورت در دسترسه (443 دست‌نخورده باقی موند)."
+    [custom_port_ssl_fail]="فعال‌سازی SSL روی پورت انتخابی شکست خورد (جزئیات: /tmp/teamkan_nginx.log). سایت فعلاً روی همون پورت با HTTP ساده در دسترسه."
 
     [webhook_title]="در حال تنظیم وب‌هوک تلگرام"
     [webhook_ok]="وب‌هوک با موفقیت روی %s ست شد"
@@ -291,7 +292,6 @@ MSG_EN=(
     [summary_title]="Summary:"
     [lbl_domain]="Domain:"
     [lbl_port]="Port:"
-    [lbl_alt_panel_url]="Alternate URL (chosen port):"
     [lbl_webroot]="File path:"
     [lbl_dbname]="Database name:"
     [lbl_dbuser]="Database user:"
@@ -304,6 +304,8 @@ MSG_EN=(
     [missing_required_flags]="Missing required options: %s"
     [admin_must_be_number]="--admin must be a number."
     [port_must_be_number]="--port must be a number between 1 and 65535."
+    [port_in_use]="Port %s is already used by another service (not nginx):\n%s"
+    [port_conflict_abort]="Install stopped to avoid breaking anything. Either free that service or pick a different port with --port (for a dedicated HTTPS port, e.g. when 443 belongs to Xray/x-ui)."
     [installing_with]="Installing with: domain=%s port=%s admin=%s email=%s"
     [none_placeholder]="<none>"
     [will_restore_db]="Database backup will be restored: %s"
@@ -346,8 +348,8 @@ MSG_EN=(
     [ssl_fail1]="Obtaining SSL failed (details: /tmp/teamkan_certbot.log). Continuing on HTTP for now;"
     [ssl_fail2]="once the domain's DNS is set up correctly, run 'kanbot' and pick the SSL renew option, or use 'sudo kanbot menu'."
     [ssl_fail3]="Note: Telegram only accepts HTTPS for webhooks, so the bot won't be reachable until SSL is fixed."
-    [custom_port_ssl_ok]="SSL also enabled on port %s; the bot is reachable over HTTPS on both 443 and this port."
-    [custom_port_ssl_fail]="Enabling SSL on the chosen port failed (details: /tmp/teamkan_nginx.log). The site is still reachable over HTTPS on 443 and over HTTP on the chosen port."
+    [custom_port_ssl_ok]="SSL enabled on port %s; the bot is reachable at https://DOMAIN:PORT (443 was left untouched)."
+    [custom_port_ssl_fail]="Enabling SSL on the chosen port failed (details: /tmp/teamkan_nginx.log). The site is still reachable over plain HTTP on that same port for now."
 
     [webhook_title]="Setting up the Telegram webhook"
     [webhook_ok]="Webhook set successfully at %s"
@@ -712,6 +714,36 @@ is_valid_port() {
     (( p >= 1 && p <= 65535 ))
 }
 
+# قبل از شروع نصب چک می‌کنه پورت‌هایی که واقعاً لازمشون داریم از قبل دست چیز
+# دیگه‌ای (مثلاً Xray/x-ui) نیستن. این دقیقاً همون مشکلیه که وقتی سرور از قبل
+# یه پنل دیگه روی 443/8080 داره پیش میاد: بدون این چک، نصب تا وسط کار پیش
+# می‌ره و بعد nginx/certbot با خطای گنگ شکست می‌خوره؛ با این چک، از همون اول
+# با یه پیغام روشن متوقف می‌شیم.
+#   - حالت پیش‌فرض (PORT=80): هم 80 هم 443 لازمن (443 برای HTTPS نهایی).
+#   - حالت پورت اختصاصی (PORT!=80): فقط 80 (برای ACME) و خودِ PORT لازمن؛
+#     اصلاً سراغ 443 نمی‌ریم، پس اگه اونجا Xray باشه اهمیتی نداره.
+preflight_port_check() {
+    local ports=(80) p line conflict=0
+    if [[ "$PORT" == "80" ]]; then
+        ports+=(443)
+    else
+        ports+=("$PORT")
+    fi
+    for p in "${ports[@]}"; do
+        line="$(ss -ltnp 2>/dev/null | awk -v pat=":${p}\$" '$4 ~ pat')"
+        [[ -z "$line" ]] && continue
+        if echo "$line" | grep -qi 'nginx'; then
+            continue
+        fi
+        err "$(t port_in_use "$p" "$line")"
+        conflict=1
+    done
+    if [[ $conflict -eq 1 ]]; then
+        err "$(t port_conflict_abort)"
+        exit 1
+    fi
+}
+
 collect_inputs() {
     title "$(t collect_title)"
     tty_read "$(t prompt_domain)" DOMAIN
@@ -947,16 +979,14 @@ setup_nginx() {
     title "$(t nginx_title)"
     detect_php_fpm
 
-    # پورت 80 همیشه باز می‌مونه چون Let's Encrypt (HTTP-01) گواهی رو فقط از
-    # همون پورت تایید می‌کنه؛ اگه کاربر پورت دیگه‌ای هم انتخاب کرده باشه، به
-    # همین بلاک server اضافه می‌شه تا سایت از هر دو پورت در دسترس باشه.
-    local extra_listen=""
-    [[ "$PORT" != "80" ]] && extra_listen="    listen $PORT;"
-
-    cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX
+    if [[ "$PORT" == "80" ]]; then
+        # حالت ساده‌ی پیش‌فرض (بدون تداخل با سرویس دیگه‌ای روی 443): همون
+        # رفتار همیشگی — پورت 80 موقتاً هم اپ رو سرو می‌کنه هم ACME رو جواب
+        # می‌ده؛ چند خط پایین‌تر certbot --nginx خودش پورت 443 استاندارد رو
+        # برای HTTPS اضافه می‌کنه.
+        cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX
 server {
     listen 80;
-$extra_listen
     server_name $DOMAIN;
     root $WEBROOT;
     index webpanel.php;
@@ -974,6 +1004,48 @@ $extra_listen
     location ~ /\. { deny all; }
 }
 NGINX
+    else
+        # حالت پورت اختصاصی: وقتی 443 (و شاید 8080) از قبل دست یه سرویس دیگه‌ست
+        # (مثلاً Xray/x-ui) — که خیلی رایجه. اینجا اصلاً سراغ 443 نمی‌ریم؛ کل
+        # اپ فقط روی $PORT سرو می‌شه و پورت 80 فقط دو کار داره: جواب دادن به
+        # چالش ACME (از روی webroot، نه پلاگین nginx-e certbot) و ریدایرکت بقیه‌ی
+        # ترافیک به https روی همون $PORT.
+        mkdir -p "$WEBROOT/.well-known/acme-challenge"
+        chown -R www-data:www-data "$WEBROOT/.well-known"
+        find "$WEBROOT/.well-known" -type d -exec chmod 750 {} \;
+
+        cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root $WEBROOT;
+    }
+
+    location / {
+        return 301 https://\$host:$PORT\$request_uri;
+    }
+}
+
+server {
+    listen $PORT;
+    server_name $DOMAIN;
+    root $WEBROOT;
+    index webpanel.php;
+
+    location ~ \.php\$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:$PHP_FPM_SOCK;
+        fastcgi_read_timeout 90s;
+        fastcgi_send_timeout 90s;
+    }
+
+    location ~ /\. { deny all; }
+}
+NGINX
+    fi
+
     ln -sf "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
     if ! nginx -t >/tmp/teamkan_nginx.log 2>&1; then
         err "$(t nginx_invalid)"
@@ -983,34 +1055,25 @@ NGINX
     ok "$(t nginx_ok)"
 }
 
-# بعد از اینکه setup_ssl گواهی رو گرفت، اگه کاربر یه پورت غیر از 80 هم انتخاب
-# کرده باشه، همون گواهی letsencrypt (از مسیر live/ که با هر تمدید خودکار
-# آپدیت می‌مونه) رو روی اون پورت هم فعال می‌کنیم؛ یعنی هم https://دامنه (۴۴۳
-# استاندارد، که Certbot خودش مدیریتش می‌کنه) هم https://دامنه:پورت کار می‌کنن.
-# بعد از اینکه setup_ssl گواهی رو گرفت، اگه کاربر یه پورت غیر از 80 هم انتخاب
-# کرده باشه، همون گواهی letsencrypt (از مسیر live/ که با هر تمدید خودکار
-# آپدیت می‌مونه) رو روی اون پورت هم فعال می‌کنیم؛ یعنی هم https://دامنه (۴۴۳
-# استاندارد، که Certbot خودش مدیریتش می‌کنه) هم https://دامنه:پورت کار می‌کنن.
-# توجه: به‌جای اضافه‌کردن یه server{} جدا برای همون پورت (که باعث دو تا
-# `listen $PORT` با تنظیمات ssl متفاوت و خطای nginx می‌شه)، فقط همون خط
-# `listen $PORT;` که خودِ setup_nginx نوشته رو داخل همون بلاک اصلی به
-# ssl ارتقا می‌دیم — یه بلاک، یه اعلان listen برای این پورت.
-setup_custom_port_ssl() {
-    [[ "$PORT" == "80" || "$PORT" == "443" ]] && return 0
+# فقط توی حالت «پورت اختصاصی» صدا زده می‌شه: بعد از اینکه setup_ssl با روش
+# webroot گواهی رو گرفت، همون خط `listen $PORT;` که خودمون توی setup_nginx
+# نوشتیم رو به ssl ارتقا می‌ده و مسیر گواهی letsencrypt رو بهش اضافه می‌کنه.
+# چون این پورت دقیقاً همونیه که خودمون کنترلش می‌کنیم (نه 443 که دست
+# Xray/x-ui-ه)، هیچ تداخلی با اون سرویس‌ها پیش نمیاد.
+enable_ssl_on_dedicated_port() {
     local conf_file="/etc/nginx/sites-available/$DOMAIN"
     local cert_dir="/etc/letsencrypt/live/$DOMAIN"
     if [[ ! -f "$cert_dir/fullchain.pem" || ! -f "$cert_dir/privkey.pem" ]]; then
-        return 0
+        warn "$(t custom_port_ssl_fail)"
+        return 1
     fi
-    if ! grep -qF "listen $PORT;" "$conf_file"; then
-        return 0
-    fi
-    sed -i "s|^    listen $PORT;\$|    listen $PORT ssl;\n    ssl_certificate     $cert_dir/fullchain.pem;\n    ssl_certificate_key $cert_dir/privkey.pem;|" "$conf_file"
+    sed -i -E "s|^(\s*listen\s+)${PORT};|\1${PORT} ssl;\n    ssl_certificate     ${cert_dir}/fullchain.pem;\n    ssl_certificate_key ${cert_dir}/privkey.pem;|" "$conf_file"
     if nginx -t >/tmp/teamkan_nginx.log 2>&1; then
         systemctl reload nginx
         ok "$(t custom_port_ssl_ok "$PORT")"
     else
         warn "$(t custom_port_ssl_fail)"
+        return 1
     fi
 }
 
@@ -1020,15 +1083,31 @@ setup_ssl() {
     local email_arg=(--register-unsafely-without-email)
     [[ -n "${SSL_EMAIL:-}" ]] && email_arg=(-m "$SSL_EMAIL")
 
-    if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos "${email_arg[@]}" >/tmp/teamkan_certbot.log 2>&1; then
-        ok "$(t ssl_ok)"
-        SITE_URL="https://$DOMAIN"
-        setup_custom_port_ssl
+    if [[ "$PORT" == "80" ]]; then
+        if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos "${email_arg[@]}" >/tmp/teamkan_certbot.log 2>&1; then
+            ok "$(t ssl_ok)"
+            SITE_URL="https://$DOMAIN"
+        else
+            warn "$(t ssl_fail1)"
+            warn "$(t ssl_fail2)"
+            warn "$(t ssl_fail3)"
+            SITE_URL="http://$DOMAIN"
+        fi
     else
-        warn "$(t ssl_fail1)"
-        warn "$(t ssl_fail2)"
-        warn "$(t ssl_fail3)"
-        SITE_URL="http://$DOMAIN"
+        # از webroot استفاده می‌کنیم، نه پلاگین nginx-e certbot: این‌جوری
+        # certbot اصلاً دست به فایل nginx نمی‌زنه (که خودمون از قبل برای
+        # کنار اومدن با Xray/x-ui به شکل خاصی نوشتیمش) و رفتارش کاملاً
+        # قابل‌پیش‌بینیه.
+        if certbot certonly --webroot -w "$WEBROOT" -d "$DOMAIN" --non-interactive --agree-tos "${email_arg[@]}" >/tmp/teamkan_certbot.log 2>&1; then
+            ok "$(t ssl_ok)"
+            SITE_URL="https://$DOMAIN:$PORT"
+            enable_ssl_on_dedicated_port
+        else
+            warn "$(t ssl_fail1)"
+            warn "$(t ssl_fail2)"
+            warn "$(t ssl_fail3)"
+            SITE_URL="http://$DOMAIN:$PORT"
+        fi
     fi
 }
 
@@ -1102,18 +1181,6 @@ install_management_symlink() {
     ok "$(t symlink_ok)"
 }
 
-# اگه کاربر پورتی غیر از 80/443 انتخاب کرده باشه، آدرس جایگزینِ همون پورت رو
-# برمی‌گردونه (https اگه گواهی روش فعال شده باشه، وگرنه http)؛ در غیر این
-# صورت رشته‌ی خالی برمی‌گردونه (یعنی آدرس جداگانه‌ای برای نمایش لازم نیست).
-alt_port_url() {
-    [[ "$PORT" == "80" || "$PORT" == "443" ]] && return 0
-    if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
-        echo "https://$DOMAIN:$PORT"
-    else
-        echo "http://$DOMAIN:$PORT"
-    fi
-}
-
 do_install_steps() {
     install_packages
     setup_database
@@ -1132,8 +1199,6 @@ do_install_steps() {
 
     title "$(t install_done_title)"
     echo -e "${C_GREEN}$(t lbl_panel_url)${C_RESET} ${SITE_URL}/webpanel.php"
-    local alt_url; alt_url="$(alt_port_url)"
-    [[ -n "$alt_url" ]] && echo -e "${C_GREEN}$(t lbl_alt_panel_url)${C_RESET} ${alt_url}/webpanel.php"
     echo -e "${C_GREEN}$(t lbl_default_pass)${C_RESET} admin  ${C_YELLOW}$(t default_pass_warn)${C_RESET}"
     echo -e "${C_GREEN}$(t lbl_manage_next)${C_RESET} $(t manage_next_text "${C_BOLD}sudo kanbot${C_RESET}")"
     echo -e "            $(t manage_next_text2 "${C_BOLD}sudo kanbot update|info|status|restart|uninstall${C_RESET}")"
@@ -1153,6 +1218,7 @@ run_install() {
     else
         parse_install_args "$@"
     fi
+    preflight_port_check
     do_install_steps
 }
 
@@ -1209,8 +1275,6 @@ mgmt_info() {
     echo "$(t lbl_domain)              $DOMAIN"
     echo "$(t lbl_port)                ${PORT:-80}"
     echo "$(t lbl_panel_url)           ${SITE_URL}/webpanel.php"
-    local alt_url; alt_url="$(alt_port_url)"
-    [[ -n "$alt_url" ]] && echo "$(t lbl_alt_panel_url)   ${alt_url}/webpanel.php"
     echo "$(t lbl_webroot)        $WEBROOT"
     echo "$(t lbl_dbname)         $DB_NAME"
     echo "$(t lbl_dbuser)        $DB_USER"
@@ -1285,11 +1349,19 @@ mgmt_reset_panel_password() {
 
 mgmt_ssl_renew() {
     title "$(t ssl_renew_title)"
-    if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email; then
-        ok "$(t ssl_renew_ok)"
-        setup_custom_port_ssl
+    if [[ "${PORT:-80}" == "80" ]]; then
+        if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email; then
+            ok "$(t ssl_renew_ok)"
+        else
+            err "$(t ssl_renew_fail)"
+        fi
     else
-        err "$(t ssl_renew_fail)"
+        if certbot certonly --webroot -w "$WEBROOT" -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email; then
+            ok "$(t ssl_renew_ok)"
+            enable_ssl_on_dedicated_port
+        else
+            err "$(t ssl_renew_fail)"
+        fi
     fi
 }
 
