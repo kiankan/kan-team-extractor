@@ -69,6 +69,19 @@ try {
         `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
+    // محدودیت تلاش ورود به پنل وب (ضد حدس رمز/بروت‌فورس) بر اساس IP. این جدول
+    // قبلاً فقط داخل بلاک یک‌بار-اجرای webpanel.php ساخته می‌شد، برای همین روی
+    // نصب‌هایی که از یه بکاپ قدیمی‌تر (قبل از اضافه‌شدنش) رستور شده بودن هیچ‌وقت
+    // ساخته نمی‌شد و پنل با یه‌صفحه‌ی سفید (PDOException) روی فرم لاگین می‌ترکید؛
+    // چون table.php (نه اون بلاک‌های قفل‌شده) مرجع واقعیه که هر نصب/آپدیت/رستور
+    // بدون هیچ سوالی صداش می‌زنه، از این به بعد هر جدول جدیدی باید همین‌جا هم اضافه بشه.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `panel_login_throttle` (
+        `ip` VARCHAR(45) PRIMARY KEY,
+        `attempts` INT DEFAULT 0,
+        `first_attempt_at` INT DEFAULT 0,
+        `locked_until` INT DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
     // آمار روزانه‌ی ناشناس برای داشبورد پنل وب: فقط عدد (تعداد استخراج، مجموع
     // کانفیگ، شمار پروتکل)، بدون هیچ لینک ساب/user_id/محتوای کانفیگ. برخلاف
     // جدول extractions که ۵ دقیقه بعد پاک می‌شه (برای امنیت)، این جدول چون هیچ
@@ -115,7 +128,7 @@ try {
     if (basename($_SERVER['PHP_SELF']) === 'table.php') {
         echo "<div style='font-family:tahoma; direction:rtl; text-align:center; margin-top:50px;'>
                 <h2 style='color:green;'>✅ جدول‌ها با موفقیت ساخته یا به‌روزرسانی شدند!</h2>
-                <p style='color:#555; font-size:13px;'>جداول: users, user_states, settings, admins, extractions, backup_imports, stats_daily, stats_daily_protocols</p>
+                <p style='color:#555; font-size:13px;'>جداول: users, user_states, settings, admins, extractions, backup_imports, panel_login_throttle, stats_daily, stats_daily_protocols</p>
               </div>";
     }
 } catch (PDOException $e) {
