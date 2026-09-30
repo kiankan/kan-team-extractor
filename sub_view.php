@@ -184,27 +184,32 @@ if (!is_array($configs)) $configs = [];
 if (isset($_GET['dl_conf'])) {
     $idx = (int)$_GET['dl_conf'];
     $cfg = $configs[$idx] ?? null;
-    if (!is_array($cfg) || strtolower((string)($cfg['protocol'] ?? '')) !== 'wireguard') {
+    $dlProto = is_array($cfg) ? strtolower((string)($cfg['protocol'] ?? '')) : '';
+    // فایل‌های متنی‌ای که راو خودشون مستقیماً یک کانفیگ کامل قابل دانلودن
+    // (نه یک لینک vless/vmess/...)؛ پسوند فایل بر اساس پروتکل تعیین می‌شه.
+    $dlExtensions = ['wireguard' => 'conf', 'openvpn' => 'ovpn'];
+    if (!is_array($cfg) || !isset($dlExtensions[$dlProto])) {
         http_response_code(404);
         header('Content-Type: text/plain; charset=utf-8');
         exit('کانفیگ یافت نشد.');
     }
+    $ext = $dlExtensions[$dlProto];
 
     $raw  = (string)($cfg['raw'] ?? '');
-    $name = (string)($cfg['name'] ?? 'wireguard');
+    $name = (string)($cfg['name'] ?? $dlProto);
 
     $utf8Name = preg_replace('/[\/\\\\:\*\?"<>\|\x00-\x1F]+/u', '_', $name);
     $utf8Name = trim((string)$utf8Name, " ._");
-    if ($utf8Name === '') $utf8Name = 'wireguard';
+    if ($utf8Name === '') $utf8Name = $dlProto;
     $utf8Name = mb_substr($utf8Name, 0, 60, 'UTF-8');
 
     $asciiName = preg_replace('/[^A-Za-z0-9_\-]+/', '_', $utf8Name);
     $asciiName = trim((string)$asciiName, '_');
-    if ($asciiName === '') $asciiName = 'wireguard';
+    if ($asciiName === '') $asciiName = $dlProto;
 
     header('Content-Type: application/octet-stream');
     header('Content-Length: ' . strlen($raw));
-    header('Content-Disposition: attachment; filename="' . $asciiName . '.conf"; filename*=UTF-8\'\'' . rawurlencode($utf8Name) . '.conf');
+    header('Content-Disposition: attachment; filename="' . $asciiName . '.' . $ext . '"; filename*=UTF-8\'\'' . rawurlencode($utf8Name) . '.' . $ext);
     header('X-Content-Type-Options: nosniff');
     echo $raw;
     exit;
@@ -769,7 +774,8 @@ function renderConfigList(filterText) {
         const item = document.createElement('div');
         item.className = 'config-item';
 
-        const { host, port } = extractHostPort(c.raw || '');
+        let { host, port } = extractHostPort(c.raw || '');
+        if (!host && c.server) { host = c.server; port = c.port || ''; }
         const address = host ? (host + (port ? ':' + port : '')) : 'آدرس نامشخص';
 
         const flagEl = document.createElement('span');
@@ -819,7 +825,7 @@ function renderConfigList(filterText) {
         actions.appendChild(copyBtn);
         actions.appendChild(qrBtn);
 
-        if ((c.protocol || '').toLowerCase() === 'wireguard') {
+        if (['wireguard', 'openvpn'].includes((c.protocol || '').toLowerCase())) {
             const dlBtn = document.createElement('button');
             dlBtn.className = 'ci-btn';
             dlBtn.textContent = '⬇️ دانلود';
@@ -1266,7 +1272,8 @@ function renderConfigList(filterText){
 
   const fragment = document.createDocumentFragment();
   filtered.forEach(c => {
-    const { host, port } = extractHostPort(c.raw || '');
+    let { host, port } = extractHostPort(c.raw || '');
+        if (!host && c.server) { host = c.server; port = c.port || ''; }
     const address = host ? (host + (port ? ':' + port : '')) : 'unknown';
 
     const row = document.createElement('div');
@@ -1296,7 +1303,7 @@ function renderConfigList(filterText){
 
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
 
-    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+    if (['wireguard', 'openvpn'].includes((c.protocol || '').toLowerCase())) {
       const dlBtn = document.createElement('button');
       dlBtn.textContent = 'dl';
       dlBtn.addEventListener('click', () => downloadConfigFile(c));
@@ -1722,7 +1729,8 @@ function renderConfigList(filterText){
   }
   const fragment = document.createDocumentFragment();
   filtered.forEach(c => {
-    const { host, port } = extractHostPort(c.raw || '');
+    let { host, port } = extractHostPort(c.raw || '');
+        if (!host && c.server) { host = c.server; port = c.port || ''; }
     const address = host ? (host + (port ? ':' + port : '')) : 'آدرس نامشخص';
 
     const row = document.createElement('div');
@@ -1748,7 +1756,7 @@ function renderConfigList(filterText){
     qrBtn.addEventListener('click', () => showConfigQR(c.raw || '', c.name || c.protocol || 'Config'));
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
 
-    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+    if (['wireguard', 'openvpn'].includes((c.protocol || '').toLowerCase())) {
       const dlBtn = document.createElement('button');
       dlBtn.textContent = '⬇️';
       dlBtn.addEventListener('click', () => downloadConfigFile(c));
@@ -2330,7 +2338,8 @@ function renderConfigList(filterText) {
         const item = document.createElement('div');
         item.className = 'config-item';
 
-        const { host, port } = extractHostPort(c.raw || '');
+        let { host, port } = extractHostPort(c.raw || '');
+        if (!host && c.server) { host = c.server; port = c.port || ''; }
         const address = host ? (host + (port ? ':' + port : '')) : 'آدرس نامشخص';
 
         const flagEl = document.createElement('span');
@@ -2380,7 +2389,7 @@ function renderConfigList(filterText) {
         actions.appendChild(copyBtn);
         actions.appendChild(qrBtn);
 
-        if ((c.protocol || '').toLowerCase() === 'wireguard') {
+        if (['wireguard', 'openvpn'].includes((c.protocol || '').toLowerCase())) {
             const dlBtn = document.createElement('button');
             dlBtn.className = 'ci-btn';
             dlBtn.textContent = '⬇️ دانلود';
@@ -3088,7 +3097,8 @@ function renderConfigList(filterText) {
   filtered.forEach(c => {
     const item = document.createElement('div');
     item.className = 'config-item';
-    const { host, port } = extractHostPort(c.raw || '');
+    let { host, port } = extractHostPort(c.raw || '');
+        if (!host && c.server) { host = c.server; port = c.port || ''; }
     const address = host ? (host + (port ? ':' + port : '')) : 'آدرس نامشخص';
 
     const flagEl = document.createElement('span');
@@ -3125,7 +3135,7 @@ function renderConfigList(filterText) {
     });
     actions.appendChild(copyBtn); actions.appendChild(qrBtn);
 
-    if ((c.protocol || '').toLowerCase() === 'wireguard') {
+    if (['wireguard', 'openvpn'].includes((c.protocol || '').toLowerCase())) {
       const dlBtn = document.createElement('button');
       dlBtn.className = 'ci-btn'; dlBtn.textContent = '⬇️ دانلود';
       dlBtn.addEventListener('click', (e) => {
