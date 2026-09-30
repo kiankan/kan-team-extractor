@@ -200,6 +200,21 @@ class AdvancedSubExtractor {
             }
         }
 
+        // بعضی پنل‌ها (دقیقاً مثل حالت وایرگارد بالا) به‌جای لینک، فایل استاندارد
+        // OpenVPN (.ovpn) رو مستقیماً به‌عنوان بدنه‌ی ساب برمی‌گردونن (شروع با
+        // خط تکیِ «client» و دستور «remote host port»). این بلاک‌ها رو هم مثل
+        // وایرگارد merge می‌کنیم، نه جایگزین، چون ممکنه همون ساب کنارش
+        // لینک‌های vless/vmess/... جدا هم داشته باشه.
+        $ovpnConfigs = [];
+        if ($this->isOpenVpnConf($response)) {
+            $ovpnConfigs = $this->parseOpenVpnConf($response);
+        } else {
+            $decodedOvpn = $this->safeBase64Decode($response);
+            if ($decodedOvpn !== null && $this->isOpenVpnConf($decodedOvpn)) {
+                $ovpnConfigs = $this->parseOpenVpnConf($decodedOvpn);
+            }
+        }
+
         if ($this->isClashYaml($response)) {
             $configs = $this->parseClashYaml($response);
         } elseif ($this->isSingBoxJson($response)) {
@@ -208,7 +223,9 @@ class AdvancedSubExtractor {
             $configs = $this->parseRawOrBase64($response);
         }
 
-        return !empty($wgConfigs) ? array_merge($wgConfigs, $configs) : $configs;
+        $configs = !empty($wgConfigs)   ? array_merge($wgConfigs, $configs)   : $configs;
+        $configs = !empty($ovpnConfigs) ? array_merge($ovpnConfigs, $configs) : $configs;
+        return $configs;
     }
 
     public function getDebugInfo(): array {
@@ -413,6 +430,83 @@ class AdvancedSubExtractor {
                     'port'     => $port,
                 ];
             }
+        }
+        return $configs;
+    }
+
+    // خیلی از پنل‌های اختصاصی OpenVPN (مثل asan-ps برای پروفایل‌های udp/tcp) به‌جای
+    // لیست لینک، مستقیماً فایل استاندارد .ovpn (شروع‌شده با خط تکیِ «client» و
+    // دستور «remote») رو به‌عنوان بدنه‌ی ساب برمی‌گردونن؛ این تابع تشخیص می‌ده.
+    private function isOpenVpnConf(string $content): bool {
+        return (bool) preg_match('/^[ \t]*client[ \t]*$/mi', $content)
+            && (bool) preg_match('/^[ \t]*remote\s+\S+\s+\d+/mi', $content);
+    }
+
+    // یک یا چند پروفایل کامل .ovpn رو (اگه ساب چند سرور/پروتکل رو پشت‌سرهم
+    // چسبونده باشه، دقیقاً مثل چند بلاک [Interface] در وایرگارد) پارس می‌کنه.
+    // هر بلاک از خط تکیِ «client» شروع می‌شه؛ متن خامِ خودِ بلاک (شامل هر
+    // بخش گواهی/کلید اینلاین مثل <ca>...</ca>) بدون تغییر به‌عنوان raw نگه
+    // داشته می‌شه تا مستقیماً به‌شکل یک فایل .ovpn معتبر قابل استفاده/دانلود باشه.
+    private function parseOpenVpnConf(string $content): array {
+        $configs = [];
+        $content = str_replace("\r\n", "\n", $content);
+
+        $blocks = preg_split('/(?=^[ \t]*client[ \t]*$)/mi', $content);
+        if (!$blocks) return [];
+
+        // مثل وایرگارد، یه کامنت اسمِ سرور که درست قبل از «client» بلاک بعدی
+        // اومده ممکنه اشتباهی ته همین بلاک بمونه؛ منتقلش می‌کنیم به اول بلاک بعدی.
+        for ($i = 0; $i < count($blocks) - 1; $i++) {
+            $lines    = explode("\n", $blocks[$i]);
+            $trailing = [];
+            while (!empty($lines)) {
+                $lastLine = trim(end($lines));
+                if ($lastLine === '' || str_starts_with($lastLine, '#') || str_starts_with($lastLine, ';')) {
+                    array_unshift($trailing, array_pop($lines));
+                } else {
+                    break;
+                }
+            }
+            if (!empty($trailing)) {
+                $blocks[$i]     = implode("\n", $lines);
+                $blocks[$i + 1] = implode("\n", $trailing) . "\n" . $blocks[$i + 1];
+            }
+        }
+
+        foreach ($blocks as $block) {
+            $block = trim($block);
+            if ($block === '' || !preg_match('/^(?:[#;][^\n]*\n\s*)*client\b/i', $block)) continue;
+
+            // اولین کامنت غیرخالیِ بالای بلاک (اگه باشه) به‌عنوان اسم سرور در نظر گرفته می‌شه
+            $name = '';
+            foreach (explode("\n", $block) as $line) {
+                $t = trim($line);
+                if ($t === '') continue;
+                if (preg_match('/^[#;]\s*(.+)$/', $t, $cm)) {
+                    if (trim($cm[1]) !== '') { $name = trim($cm[1]); break; }
+                    continue;
+                }
+                break; // به اولین خط غیرکامنت رسیدیم، دیگه کامنتی برای اسم نیست
+            }
+
+            // ممکنه چند خط «remote» (مثلاً یکی udp و یکی tcp) برای همون سرور باشه؛
+            // اولی رو برای نمایش host/port برمی‌داریم، ولی همه‌شون داخل raw می‌مونن.
+            $server = '';
+            $port   = '';
+            if (preg_match('/^[ \t]*remote\s+(\S+)\s+(\d+)/mi', $block, $rm)) {
+                $server = $rm[1];
+                $port   = $rm[2];
+            }
+
+            if ($name === '') $name = $server !== '' ? $server : 'OpenVPN Config';
+
+            $configs[] = [
+                'name'     => $name,
+                'protocol' => 'OPENVPN',
+                'raw'      => $block,
+                'server'   => $server,
+                'port'     => $port,
+            ];
         }
         return $configs;
     }
@@ -636,7 +730,7 @@ class AdvancedSubExtractor {
             $protocols[$p] = ($protocols[$p] ?? 0) + 1;
         }
 
-        foreach (['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'wireguard', 'custom', 'json', 'other'] as $key) {
+        foreach (['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'wireguard', 'openvpn', 'custom', 'json', 'other'] as $key) {
             $protocols[$key] = $protocols[$key] ?? 0;
         }
         if (!empty($protocols['unknown'])) {
@@ -2659,8 +2753,10 @@ try {
                     $expStr     = ($headerInfo['expire'] ?? 0) > 0 ? jdate('Y/m/d H:i', (int)$headerInfo['expire']) : 'نامحدود';
 
                     $otherText = "";
-                    if (($subData['protocols']['custom'] ?? 0) > 0) $otherText .= " | Custom: {$subData['protocols']['custom']}";
-                    if (($subData['protocols']['json'] ?? 0) > 0)   $otherText .= " | JSON: {$subData['protocols']['json']}";
+                    if (($subData['protocols']['custom'] ?? 0) > 0)    $otherText .= " | Custom: {$subData['protocols']['custom']}";
+                    if (($subData['protocols']['json'] ?? 0) > 0)      $otherText .= " | JSON: {$subData['protocols']['json']}";
+                    if (($subData['protocols']['wireguard'] ?? 0) > 0) $otherText .= " | WireGuard: {$subData['protocols']['wireguard']}";
+                    if (($subData['protocols']['openvpn'] ?? 0) > 0)   $otherText .= " | OpenVPN: {$subData['protocols']['openvpn']}";
                     
                     $resText = "📊 <b>گزارش استخراج:</b>\n\n📦 کل کانفیگ‌ها: {$subData['total_configs']}\n📈 حجم کل: {$volStr}\n📉 مصرف شده: {$usedStr}\n🔋 باقیمانده: {$remainStr}\n⏳ انقضا: {$expStr}\n\n🔹 <b>پروتکل‌ها:</b>\nVLESS: {$subData['protocols']['vless']} | VMess: {$subData['protocols']['vmess']}{$otherText}\n\n⏳ <i>لینک «مشاهده در وب» فقط تا ۵ دقیقه بعد از آخرین بروزرسانی معتبره و بعدش به‌طور خودکار حذف می‌شه.</i>\n\n📝 <b>نام‌ها:</b>\n";
                     foreach ($subData['configs_list'] as $i => $c) {
@@ -3414,9 +3510,11 @@ try {
                             $expStr    = $expireTimestamp > 0 ? jdate('Y/m/d H:i', $expireTimestamp) : 'نامحدود';
 
                             $otherText = "";
-                            if (($subData['protocols']['custom'] ?? 0) > 0) $otherText .= " | Custom: {$subData['protocols']['custom']}";
-                            if (($subData['protocols']['json'] ?? 0) > 0)   $otherText .= " | JSON: {$subData['protocols']['json']}";
-                            if (($subData['protocols']['other'] ?? 0) > 0)  $otherText .= " | سایر: {$subData['protocols']['other']}";
+                            if (($subData['protocols']['custom'] ?? 0) > 0)    $otherText .= " | Custom: {$subData['protocols']['custom']}";
+                            if (($subData['protocols']['json'] ?? 0) > 0)      $otherText .= " | JSON: {$subData['protocols']['json']}";
+                            if (($subData['protocols']['wireguard'] ?? 0) > 0) $otherText .= " | WireGuard: {$subData['protocols']['wireguard']}";
+                            if (($subData['protocols']['openvpn'] ?? 0) > 0)   $otherText .= " | OpenVPN: {$subData['protocols']['openvpn']}";
+                            if (($subData['protocols']['other'] ?? 0) > 0)     $otherText .= " | سایر: {$subData['protocols']['other']}";
                             
                             $resText = "📊 <b>گزارش استخراج (بروزرسانی شده):</b>\n\n📦 کل کانفیگ‌ها: {$subData['total_configs']}\n📈 حجم کل: {$volStr}\n📉 مصرف شده: {$usedStr}\n🔋 باقیمانده: {$remainStr}\n⏳ انقضا: {$expStr}\n\n🔹 <b>پروتکل‌ها:</b>\nVLESS: {$subData['protocols']['vless']} | VMess: {$subData['protocols']['vmess']} | Trojan: {$subData['protocols']['trojan']}{$otherText}\n\n📝 <b>نام‌ها:</b>\n";
                             
