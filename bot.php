@@ -63,11 +63,11 @@ class AdvancedSubExtractor {
         return $this->fetchUrl($url, $useBrowserUA);
     }
 
-    // بعضی پنل‌های وایرگارد (مثل asan-ps) به‌جای دادنِ همه‌ی سرورها زیر یک لینک، از
-    // پارامتر ?host=2, ?host=3, ... روی همون لینکِ ساب برای سوییچ بین سرورها استفاده
-    // می‌کنن (لینک پایه بدون پارامتر معادل host=1 هست). این متد وقتی پاسخِ پایه
-    // وایرگارده، همین پارامتر رو با شماره‌های بعدی امتحان می‌کنه و هر سرور جدیدی که
-    // پیدا کنه رو اضافه می‌کنه.
+    // بعضی پنل‌های وایرگارد/OpenVPN (مثل asan-ps) به‌جای دادنِ همه‌ی سرورها زیر
+    // یک لینک، از پارامتر ?host=0, ?host=1, ?host=2, ... روی همون لینکِ ساب برای
+    // سوییچ بین سرورها استفاده می‌کنن. این متد (برای هر دو فرمت وایرگارد و
+    // OpenVPN) از host=0 تا host=30 رو امتحان می‌کنه و هر سرور جدیدی که پیدا
+    // کنه رو اضافه می‌کنه.
     //
     // نکته‌ی مهم (پیدا شده با تست واقعی روی asan-ps): ?host=N همیشه خطی/ترتیبی به
     // سرورها نگاشت نمی‌شه؛ بعضی پنل‌ها انتخاب شبه‌تصادفی/وزن‌دار دارن — یعنی یه
@@ -83,14 +83,16 @@ class AdvancedSubExtractor {
     // به خطا/rate-limit کنه (که همون batch رو بی‌نتیجه می‌کنه) زودتر متوقف می‌شیم
     // به‌جای اینکه بی‌فایده کل بازه رو بمباران کنیم.
     public function mergeWireguardHostVariants(string $url, string $baseResponse, array $configs, bool $useBrowserUA = false): array {
-        if (!$this->isWireguardConf($baseResponse)) return $configs;
+        $baseIsWg   = $this->isWireguardConf($baseResponse);
+        $baseIsOvpn = !$baseIsWg && $this->isOpenVpnConf($baseResponse);
+        if (!$baseIsWg && !$baseIsOvpn) return $configs;
 
         $maxHost   = 30;
         $batchSize = 8;
         $seenResponses = [$baseResponse];
         $existingRaw   = array_column($configs, 'raw');
 
-        for ($batchStart = 2; $batchStart <= $maxHost; $batchStart += $batchSize) {
+        for ($batchStart = 0; $batchStart <= $maxHost; $batchStart += $batchSize) {
             $batchEnd = min($batchStart + $batchSize - 1, $maxHost);
             $urls = [];
             for ($hostIdx = $batchStart; $hostIdx <= $batchEnd; $hostIdx++) {
@@ -101,12 +103,19 @@ class AdvancedSubExtractor {
             $foundNewInBatch = false;
             foreach ($this->fetchUrlBatchParallel($urls, $useBrowserUA) as $resp) {
                 if ($resp === null || $resp === '') continue;
-                if (!$this->isWireguardConf($resp)) continue;
                 if (in_array($resp, $seenResponses, true)) continue; // این پاسخِ خاص رو قبلاً دیدیم
+
+                // فرمت این پاسخِ خاص ممکنه با baseResponse یکی نباشه (به‌ندرت)، پس
+                // هر پاسخ رو دوباره تشخیص می‌دیم و با پارسرِ متناظرش پارس می‌کنیم.
+                $isWg   = $this->isWireguardConf($resp);
+                $isOvpn = !$isWg && $this->isOpenVpnConf($resp);
+                if (!$isWg && !$isOvpn) continue;
+
                 $seenResponses[]  = $resp;
                 $foundNewInBatch  = true;
 
-                foreach ($this->parseWireguardConf($resp) as $c) {
+                $newConfigs = $isWg ? $this->parseWireguardConf($resp) : $this->parseOpenVpnConf($resp);
+                foreach ($newConfigs as $c) {
                     if (!in_array($c['raw'], $existingRaw, true)) {
                         $configs[]      = $c;
                         $existingRaw[]  = $c['raw'];
@@ -1807,13 +1816,14 @@ function editMessageText($chatId, int $messageId, string $text, ?array $replyMar
 // مفیدن، متن خام کانفیگ وایرگارد یه فایل .conf کامله؛ برای همین به‌جای فرستادن
 // توی <code>، به‌عنوان attachment واقعی (sendDocument) با پسوند .conf ارسال می‌شه
 // تا مستقیم توی اپ وایرگارد قابل ایمپورت باشه.
-function sendConfigFile($chatId, string $baseName, string $content, string $caption = '', ?array $replyMarkup = null): void {
+function sendConfigFile($chatId, string $baseName, string $content, string $caption = '', ?array $replyMarkup = null, string $extension = 'conf'): void {
     // فقط کاراکترهایی که واقعاً توی اسم فایل مشکل‌سازن (جداکننده مسیر، کوتیشن،
     // کاراکترهای کنترلی) حذف می‌شن؛ حروف فارسی/ایموجی (اسم واقعی کانفیگ) نگه
     // داشته می‌شن چون تلگرام اسم فایل یونیکد رو بدون مشکل نمایش می‌ده.
+    $extension = preg_replace('/[^a-z0-9]/i', '', $extension) ?: 'conf';
     $safeName = preg_replace('/[\/\\\\:\*\?"<>\|\x00-\x1F]+/u', '_', $baseName);
     $safeName = trim((string)$safeName, " ._");
-    if ($safeName === '') $safeName = 'wireguard';
+    if ($safeName === '') $safeName = $extension === 'ovpn' ? 'openvpn' : 'wireguard';
     $safeName = mb_substr($safeName, 0, 60, 'UTF-8');
 
     // اگه به هر دلیلی (پوشه‌ی temp غیرقابل‌نوشتن و ...) نتونیم فایل بسازیم، به‌جای
@@ -1824,7 +1834,7 @@ function sendConfigFile($chatId, string $baseName, string $content, string $capt
         sendMessage($chatId, ($caption !== '' ? $caption . "\n\n" : '') . "<code>" . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . "</code>", $replyMarkup);
         return;
     }
-    $confFile = $tmpFile . '.conf';
+    $confFile = $tmpFile . '.' . $extension;
     if (!rename($tmpFile, $confFile)) {
         @unlink($tmpFile);
         sendMessage($chatId, ($caption !== '' ? $caption . "\n\n" : '') . "<code>" . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . "</code>", $replyMarkup);
@@ -1832,7 +1842,7 @@ function sendConfigFile($chatId, string $baseName, string $content, string $capt
     }
     file_put_contents($confFile, $content);
 
-    $postData = ['chat_id' => $chatId, 'document' => new CURLFile(realpath($confFile), 'application/octet-stream', $safeName . '.conf')];
+    $postData = ['chat_id' => $chatId, 'document' => new CURLFile(realpath($confFile), 'application/octet-stream', $safeName . '.' . $extension)];
     if ($caption !== '') {
         $postData['caption']    = applyPremiumToText($caption);
         $postData['parse_mode'] = 'HTML';
@@ -2739,7 +2749,7 @@ try {
 
             if ($currentState === 'WAITING_FOR_SUB_URL') {
                 if (!filter_var($text, FILTER_VALIDATE_URL)) { sendMessage($chatId, "❌ آدرس نامعتبر است. مجدد بفرستید:"); exit; }
-                sendMessage($chatId, "⏳ در حال استخراج...");
+                sendMessage($chatId, "⏳ در حال استخراج کانفیگ‌ها...\nاگه ساب شما چند سروره (وایرگارد/OpenVPN)، بررسی سرورهای بیشتر ممکنه چند لحظه طول بکشه، لطفاً صبر کنید.");
                 $parallel   = fetchSubAndHeaderParallel($text);
                 $subData    = $parallel['subData'];
                 $headerInfo = $parallel['headerInfo'];
@@ -3495,7 +3505,7 @@ try {
 
                 if ($subUrl) {
                     if ($data === 'update_sub_data') {
-                        editMessageText($chatId, $messageId, "⏳ لطفا چند لحظه صبر کنید...");
+                        editMessageText($chatId, $messageId, "⏳ در حال بروزرسانی...\nاگه ساب شما چند سروره (وایرگارد/OpenVPN)، بررسی سرورهای بیشتر ممکنه چند لحظه طول بکشه، لطفاً صبر کنید.");
                         $parallel   = fetchSubAndHeaderParallel($subUrl);
                         $subData    = $parallel['subData'];
                         $headerInfo = $parallel['headerInfo'];
@@ -3596,10 +3606,11 @@ try {
                         $subData = getConfigsListForDisplay($pdo, $subUrl, $stateData['view_token'] ?? '');
                         if (is_array($subData) && !empty($subData['configs_list'])) {
                             $textConfigs = [];
-                            $wgConfigs   = [];
+                            $fileConfigs = []; // وایرگارد و OpenVPN: خودشون یه فایل کامل‌ان، نه یه لینک تکی
                             foreach ($subData['configs_list'] as $c) {
-                                if (strtolower($c['protocol']) === 'wireguard') {
-                                    $wgConfigs[] = $c;
+                                $proto = strtolower($c['protocol']);
+                                if ($proto === 'wireguard' || $proto === 'openvpn') {
+                                    $fileConfigs[] = $c;
                                 } else {
                                     $textConfigs[] = $c;
                                 }
@@ -3609,7 +3620,7 @@ try {
                             // دکمه‌ی بازگشت مستقیم روی آخرین پیامی که واقعاً فرستاده می‌شه
                             // می‌شینه؛ سریع‌تره چون یکی-دو پیام اضافه کمتر رد و بدل می‌شه.
                             $backKb  = ['inline_keyboard' => [[createBtn('🔙 بازگشت', 'back_to_main_menu', 'success', 'btn_back')]]];
-                            $hasWg   = !empty($wgConfigs);
+                            $hasFileConfigs = !empty($fileConfigs);
 
                             if (!empty($textConfigs)) {
                                 $messages    = [];
@@ -3623,21 +3634,23 @@ try {
                                 if (!empty($currentText)) $messages[] = $currentText;
                                 $lastTextIdx = count($messages) - 1;
                                 foreach ($messages as $idx => $msg) {
-                                    $isLast = !$hasWg && $idx === $lastTextIdx;
+                                    $isLast = !$hasFileConfigs && $idx === $lastTextIdx;
                                     sendMessage($chatId, $msg, $isLast ? $backKb : null);
                                     if ($idx < $lastTextIdx) usleep(250000);
                                 }
                             }
 
-                            if ($hasWg) {
-                                // کانفیگ وایرگارد یه لینک تکی نیست؛ چون خودش یه فایل .conf کامله،
-                                // به‌جای متن توی چت، مستقیم به‌عنوان فایل قابل‌ایمپورت فرستاده می‌شه.
-                                $lastWgIdx = count($wgConfigs) - 1;
-                                foreach ($wgConfigs as $idx => $c) {
+                            if ($hasFileConfigs) {
+                                // وایرگارد/OpenVPN یه لینک تکی نیستن؛ چون خودشون یه فایل .conf/.ovpn
+                                // کامل‌ان، به‌جای متن توی چت، مستقیم به‌عنوان فایل قابل‌ایمپورت فرستاده می‌شن.
+                                $lastFileIdx = count($fileConfigs) - 1;
+                                foreach ($fileConfigs as $idx => $c) {
+                                    $proto        = strtolower($c['protocol']);
+                                    $extension    = $proto === 'openvpn' ? 'ovpn' : 'conf';
                                     $nameWithFlag = addFlagToConfigName($c['name']);
                                     $caption = "📌 {$nameWithFlag}\n<b>team kan</b>";
-                                    $isLast  = $idx === $lastWgIdx;
-                                    sendConfigFile($chatId, $c['name'] ?: ($c['server'] ?: 'wireguard'), $c['raw'], $caption, $isLast ? $backKb : null);
+                                    $isLast  = $idx === $lastFileIdx;
+                                    sendConfigFile($chatId, $c['name'] ?: ($c['server'] ?: $proto), $c['raw'], $caption, $isLast ? $backKb : null, $extension);
                                     if (!$isLast) usleep(250000);
                                 }
                             }
