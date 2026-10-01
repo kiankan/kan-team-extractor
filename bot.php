@@ -842,6 +842,15 @@ class AdvancedSubExtractor {
             return $empty;
         }
 
+        // بلاک خامِ OpenVPN (خروجی parseOpenVpnConf) هم با اسکیم شروع نمی‌شه؛
+        // خط «remote host port» رو مستقیم از متن در میاریم (اولین remote کافیه).
+        if (preg_match('/^[ \t]*client[ \t]*$/mi', $raw)) {
+            if (preg_match('/^[ \t]*remote\s+(\S+)\s+(\d+)/mi', $raw, $rm)) {
+                return ['host' => $rm[1], 'port' => $rm[2]];
+            }
+            return $empty;
+        }
+
         if (!preg_match('#^([a-z0-9]+)://#i', $raw, $sm)) return $empty;
         $scheme = strtolower($sm[1]);
 

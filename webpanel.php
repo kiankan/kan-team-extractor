@@ -952,7 +952,7 @@ if (isset($_GET['api'])) {
             $extractions[] = ['date' => $d, 'label' => $label, 'count' => $extractionsByDate[$d] ?? 0];
         }
 
-        $protocolLabels = ['vless' => 'VLESS', 'vmess' => 'VMess', 'trojan' => 'Trojan', 'shadowsocks' => 'Shadowsocks', 'hysteria2' => 'Hysteria2', 'tuic' => 'TUIC', 'wireguard' => 'WireGuard', 'custom' => 'Custom', 'json' => 'JSON', 'other' => 'سایر'];
+        $protocolLabels = ['vless' => 'VLESS', 'vmess' => 'VMess', 'trojan' => 'Trojan', 'shadowsocks' => 'Shadowsocks', 'hysteria2' => 'Hysteria2', 'tuic' => 'TUIC', 'wireguard' => 'WireGuard', 'openvpn' => 'OpenVPN', 'custom' => 'Custom', 'json' => 'JSON', 'other' => 'سایر'];
         $protoRows = $pdo->query("SELECT protocol, SUM(configs_count) AS c FROM stats_daily_protocols GROUP BY protocol ORDER BY c DESC")->fetchAll();
         $protocols = [];
         $otherSum  = 0;
